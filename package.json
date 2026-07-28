@@ -10,19 +10,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
-  },
-  "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
