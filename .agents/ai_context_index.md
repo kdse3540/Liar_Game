@@ -195,11 +195,11 @@
 ---
 
 ---
-## [2026-07-29 / 📱 일상 용품 카테고리 완전 제거 완료]
-- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\words.js`, `d:\Make_Game\Liar_Game\src\App.tsx`
-- **핵심 기능 및 역할:** 사용자 요청에 따라 `server/words.js` 데이터베이스 및 `App.tsx` 대기실 방장 드롭다운 옵션에서 `일상 용품` 카테고리를 완전히 삭제함.
-- **주요 함수/에셋 레퍼런스:** `wordCategories` 배열, `App.tsx` 내 제시어 주제 드롭다운.
-- **특이사항/의존성:** 현재 사용 가능한 주제: 전체 무작위, 장소 / 놀거리 (62개), 음식 / 디저트 (100개), 직업 (71개), 동식물 (102개), 전자제품 (50개).
+## [2026-07-29 / 📦 Vercel 빌드 패키지 미설치 에러 해결 (package.json 의존성 통합)]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`
+- **핵심 기능 및 역할:** Vercel 빌드 서버에서 `Installing dependencies...` 수행 시 Vite 및 Tailwind 관련 도구가 누락되지 않도록 `devDependencies`의 패키지들을 `dependencies` 항목으로 통합 교정하고 GitHub `main` 브랜치에 푸시함.
+- **주요 함수/에셋 레퍼런스:** `package.json`의 `dependencies` 항목.
+- **특이사항/의존성:** 푸시 후 Vercel이 새 커밋(`ada5990`)을 감지하여 자동 재빌드 수행.
 ---
 
 
