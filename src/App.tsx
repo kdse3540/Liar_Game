@@ -1,0 +1,1886 @@
+import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { Avatar, Button, ChatBubbles } from "./components/AstraUI";
+import { VisualInspector } from "./components/VisualInspector";
+import { socket } from "./services/socket";
+import { generateRandomNickname } from "./utils/nickname";
+
+/**
+ * ====================================================================
+ * [라이어 게임 (Liar Game) 메인 앱 컴포넌트]
+ * --------------------------------------------------------------------
+ * 이 파일은 피그마에서 설계한 UI를 바탕으로 구성된 메인 화면입니다.
+ * 백엔드 소켓(Socket.io)과 실시간 연동되어 여러 명의 플레이어가
+ * 동시 접속하여 방 만들기, 채팅, 제시어 전달 및 라이어 게임을 함께 플레이할 수 있습니다.
+ * ====================================================================
+ */
+
+// --------------------------------------------------------------------
+// 1. 타입 정의 (Type Definitions)
+// --------------------------------------------------------------------
+type Screen = "home" | "character" | "room" | "play";
+
+// --------------------------------------------------------------------
+// 2. 초기 데이터 (Mock Data)
+// --------------------------------------------------------------------
+const portraits = ["🦊", "🐻", "🐣", "🐰", "🐸", "🐹", "🐯", "🐼", "🦁", "🐨", "🐶", "🐱", "🦄", "🐙"];
+
+// 기본 6명 디폴트 플레이어
+const defaultPlayers = [
+  { name: "모카", icon: "🦊", ready: true, color: "#ff6f3c", softColor: "#ffe3d1" },
+  { name: "밤비", icon: "🐻", ready: true, color: "#4a8eff", softColor: "#dbeaff" },
+  { name: "구름", icon: "🐣", ready: false, color: "#f5b300", softColor: "#fff2c4" },
+  { name: "해나", icon: "🐰", ready: true, color: "#9b51e0", softColor: "#eedfff" },
+  { name: "나", icon: "🐸", ready: true, color: "#10b981", softColor: "#cbf7e6" },
+  { name: "단추", icon: "🐹", ready: true, color: "#ff4785", softColor: "#ffdbe8" },
+];
+
+function Logo() {
+  return <div className="logo" aria-label="라이어 게임"><span>LIAR</span><b>GAME</b><i>!</i></div>;
+}
+
+function PlayerChip({
+  player,
+  compact = false,
+  displayName,
+  displayIcon,
+  speech,
+  onEdit,
+  onClick,
+}: {
+  player: { socketId?: string; name: string; icon: string; ready?: boolean; isHost?: boolean; color: string; softColor: string };
+  compact?: boolean;
+  displayName?: string;
+  displayIcon?: string;
+  speech?: string;
+  onEdit?: () => void;
+  onClick?: () => void;
+}) {
+  const icon = displayIcon ?? player.icon;
+  return (
+    <div
+      className={`player-chip ${compact ? "compact" : ""}`}
+      onClick={onClick}
+      style={{
+        ...(compact ? {} : { backgroundColor: player.softColor, borderColor: player.color }),
+        cursor: onClick ? "pointer" : "default",
+      }}
+      title={onClick ? "클릭 시 이 유저의 힌트 제출 기록 보기" : undefined}
+    >
+      {speech && (
+        <div
+          className="player-speech"
+          style={{ backgroundColor: player.softColor, borderColor: player.color, "--speech-bg": player.softColor } as CSSProperties}
+        >
+          {speech}
+        </div>
+      )}
+      <div className="avatar" style={{ background: player.color }}>
+        {icon}
+      </div>
+      <span>{displayName ?? player.name}</span>
+      {/* 방장은 "👑 HOST", 일반 유저는 Ready 상태에 따라 "READY" 또는 "..."로 표시 */}
+      {!compact && (
+        <em className={player.isHost ? "host" : player.ready ? "ready" : "waiting"}>
+          {player.isHost ? "👑 HOST" : player.ready ? "READY" : "..."}
+        </em>
+      )}
+      {onEdit && <button className="nickname-edit" onClick={(e) => { e.stopPropagation(); onEdit(); }}>닉네임 편집</button>}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// 4. 메인 App 컴포넌트
+// --------------------------------------------------------------------
+export default function App() {
+  // [상태 관리 - State]
+  const [screen, setScreen] = useState<Screen>("home");
+  const [nickname, setNickname] = useState("");
+  // 기본 무작위 조합 닉네임 (미입력 시 사용되는 귀여운 조합 닉네임: 예 - "배고픈 감자")
+  const [defaultNickname, setDefaultNickname] = useState(() => generateRandomNickname());
+  const [selectedPortrait, setSelectedPortrait] = useState(0);
+  const [editingNickname, setEditingNickname] = useState(false);
+  
+  // 실시간 방 및 서버 플레이어 상태
+  const [onlinePlayers, setOnlinePlayers] = useState<any[]>(defaultPlayers);
+  const [isHost, setIsHost] = useState(true);
+  const [myPlayerInfo, setMyPlayerInfo] = useState<any>(null);
+  const [joinInputCode, setJoinInputCode] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  // 실시간 라이어 비밀 제시어 정보
+  const [secretCategory, setSecretCategory] = useState("장소 / 놀거리");
+  const [secretWord, setSecretWord] = useState("놀이공원");
+  const [isLiar, setIsLiar] = useState(false);
+
+  // 채팅 및 메시지 상태
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatLog, setChatLog] = useState<{ text: string; time: string }[]>([]);
+  
+  // 캐릭터 머리 위 말풍선 3초 표시 제어용 State & 발신자 소켓 ID & Timer Ref
+  const [showBubble, setShowBubble] = useState(false);
+  const [activeSpeakerSocketId, setActiveSpeakerSocketId] = useState<string | null>(null);
+  const bubbleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 채팅창 자동 스크롤 제어용 Ref
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  
+  // 방 설정 정보
+  const [roomCode, setRoomCode] = useState("MANGO7");
+  const [roomTitle, setRoomTitle] = useState("모카의 비밀 아지트");
+  const [roomPassword, setRoomPassword] = useState(""); // 기본값 빈 문자열 (비밀번호 없음)
+  const [maxPlayers, setMaxPlayers] = useState(14);
+  const [hintTime, setHintTime] = useState("60");
+  const [defenseTime, setDefenseTime] = useState("45");
+  const [liarCount, setLiarCount] = useState("1");
+  const [selectedCategory, setSelectedCategory] = useState("ALL"); // 주제 카테고리 (ALL: 전체 무작위)
+  const [categories, setCategories] = useState<string[]>(["ALL", "장소 / 놀거리", "음식 / 디저트", "직업", "동식물", "전자제품"]);
+  const [fastTestMode, setFastTestMode] = useState<boolean>(false); // 테스트용 초스피드 모드 (모든 타이머 1초)
+  const [playerHints, setPlayerHints] = useState<Record<string, Array<{ round: number; text: string; time: string }>>>({}); // 각 유저별 힌트 기록
+  const [selectedHintPlayer, setSelectedHintPlayer] = useState<any>(null); // 힌트 모달에 띄울 유저
+  const [copied, setCopied] = useState(false);
+  const [selectedVote, setSelectedVote] = useState("밤비");
+  const [timer, setTimer] = useState(78);
+
+  // 사용자가 닉네임을 작성하지 않으면 무작위 조합 닉네임(defaultNickname)을 자동 사용함
+  const currentNickname = nickname.trim() || defaultNickname;
+  const myIcon = portraits[selectedPortrait] || "🦊";
+
+  // 메시지 전송 시 자동 최하단 스크롤
+  useEffect(() => {
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    }
+  }, [chatLog]);
+
+  // 최대 인원 변경 시 라이어 인원 자동 보정
+  useEffect(() => {
+    const maxLiar = Math.max(1, Math.floor(maxPlayers / 2));
+    if (Number(liarCount) > maxLiar) {
+      setLiarCount(String(maxLiar));
+    }
+  }, [maxPlayers, liarCount]);
+
+  // 비밀번호 입력 모달 및 대기 방 코드
+  const [passModalOpen, setPassModalOpen] = useState(false);
+  const [passInput, setPassInput] = useState("");
+  const [pendingRoomCode, setPendingRoomCode] = useState("");
+
+  // URL에서 전달받은 초대 목표 방 코드 (초대 링크 접속자용)
+  const [targetRoomCode, setTargetRoomCode] = useState("");
+
+  // v6 기획 게임 진행 Phase & 상태 (투표 후 최후변론/자기변호/최종결정 플로우 Phase 포함)
+  const [gamePhase, setGamePhase] = useState<"waiting" | "countdown" | "notice" | "hint-turn" | "free-talk" | "vote" | "vote-result" | "last-words" | "guilty-vote" | "roulette" | "result" | "final-defense" | "self-defense" | "post-vote-free-talk" | "final-decision" | "re-vote">("waiting");
+  const [countdownNum, setCountdownNum] = useState(3);
+  const [turnSpeakerSocketId, setTurnSpeakerSocketId] = useState<string>("");
+  const [turnTimeLeft, setTurnTimeLeft] = useState(20);
+  const [eliminatedSocketIds, setEliminatedSocketIds] = useState<string[]>([]);
+  const [voteTallyData, setVoteTallyData] = useState<{ tally: Record<string, number>; voteDetails: any[] } | null>(null);
+  const [rouletteData, setRouletteData] = useState<{ candidateSocketIds: string[]; chosenSocketId: string; chosenPlayer: any; rouletteType: string } | null>(null);
+  const [isRouletteSpinning, setIsRouletteSpinning] = useState(false);
+  const [lastWordsSpeaker, setLastWordsSpeaker] = useState<any>(null);
+  const [guiltyVotes, setGuiltyVotes] = useState<{ innocent: number; total: number } | null>(null);
+  const [currentRound, setCurrentRound] = useState<number>(1);
+
+  const [discussionTime, setDiscussionTime] = useState("40");
+  const [turnNoticeText, setTurnNoticeText] = useState("");
+  const [selectedVoteTarget, setSelectedVoteTarget] = useState<string>("");
+  const [hasVoted, setHasVoted] = useState<boolean>(false);
+  const [isSystemTyping, setIsSystemTyping] = useState<boolean>(false);
+  const [showFreeTalkNotice, setShowFreeTalkNotice] = useState<boolean>(false);
+  const [speakerTurnNotice, setSpeakerTurnNotice] = useState<{ name: string; icon: string; timeSec: number } | null>(null);
+
+  // ── 투표 후 최후변론/자기변호/최종결정 플로우 State ──
+  const [topVotedSocketIds, setTopVotedSocketIds] = useState<string[]>([]);          // 최다 득표자 소켓 ID 배열
+  const [postVoteExcludedIds, setPostVoteExcludedIds] = useState<string[]>([]);      // 투표 후 자유토론 시 채팅 잠금 대상
+  const [finalDecisionTarget, setFinalDecisionTarget] = useState<{ socketId: string; name: string; icon: string } | null>(null); // 최종 결정 투표 대상
+  const [selectedFinalDecision, setSelectedFinalDecision] = useState<"guilty" | "innocent" | "">(""   ); // 유죄/무죄 선택
+  const [hasFinalVoted, setHasFinalVoted] = useState(false);                          // 최종 결정 투표 완료 여부
+  const [finalDecisionResult, setFinalDecisionResult] = useState<any>(null);          // 최종 결정 결과
+  const [reVoteCandidates, setReVoteCandidates] = useState<string[]>([]);             // 재투표 후보 소켓 ID 배열
+  const [selectedReVoteTarget, setSelectedReVoteTarget] = useState<string>("");       // 재투표 선택 대상
+  const [hasReVoted, setHasReVoted] = useState(false);                                // 재투표 완료 여부
+  const [showPostVoteNotice, setShowPostVoteNotice] = useState(false);                // 투표 후 모달 표시 제어
+  const [gameResultData, setGameResultData] = useState<any>(null);                    // 게임 최종 결과 데이터
+  const [innocentClearedNotice, setInnocentClearedNotice] = useState<{ targetName: string; targetIcon: string; innocentPercent: number } | null>(null); // 80% 무죄 구제 안내 모달
+
+  // 시스템 발언/공지 진행 중에만 주변 UI 회색빛 디밍 적용 (발언 시작 시 자동 풀림)
+  // 투표 후 플로우 모달(최후변론/자기변호/자유토론/최종결정/재투표/80%무죄구제) 표시 시에도 디밍 적용
+  const isNoticeDimmed = gamePhase === "notice" || gamePhase === "countdown" || isSystemTyping || showFreeTalkNotice || Boolean(speakerTurnNotice) || showPostVoteNotice || Boolean(innocentClearedNotice);
+
+  const isPassingRef = useRef(false);
+
+  const handleTurnPass = () => {
+    if (isPassingRef.current) return;
+    isPassingRef.current = true;
+    socket.emit("turn-pass");
+    setTimeout(() => {
+      isPassingRef.current = false;
+    }, 1200);
+  };
+
+  // 대기실 방 설정(힌트시간, 토론시간 등) 변경 시 백엔드로 즉시 실시간 소켓 송신
+  const handleUpdateRoomSettings = (overrides?: any) => {
+    if (!isHost) return;
+    socket.emit("update-room-settings", {
+      roomTitle: overrides?.roomTitle ?? roomTitle,
+      roomPassword: overrides?.roomPassword ?? roomPassword,
+      maxPlayers: overrides?.maxPlayers ?? maxPlayers,
+      liarCount: overrides?.liarCount ?? liarCount,
+      hintTime: overrides?.hintTime ?? hintTime,
+      discussionTime: overrides?.discussionTime ?? discussionTime,
+      fastTestMode: overrides?.fastTestMode ?? fastTestMode,
+      selectedCategory: overrides?.selectedCategory ?? selectedCategory,
+    });
+  };
+
+  // --------------------------------------------------------------------
+  // 턴 남은 시간 실시간 1초 카운트다운 타이머 인터벌 (시스템 설명 중에는 일시 정지)
+  // --------------------------------------------------------------------
+  useEffect(() => {
+    // 오직 실제 플레이어 힌트 발언(hint-turn), 자유 토론(free-talk),
+    // 최후변론(final-defense), 자기변호(self-defense), 투표후 자유토론(post-vote-free-talk) 일 때에만 카운트가 흐름
+    // 시스템 안내(notice), 카운트다운(countdown), 룰렛(roulette), 투표결과(vote-result) 동안은 카운트 일시 정지!
+    const timerPhases = ["hint-turn", "free-talk", "final-defense", "self-defense", "post-vote-free-talk"];
+    if (screen !== "play" || !timerPhases.includes(gamePhase)) return;
+
+    const myId = socket.id || myPlayerInfo?.socketId;
+
+    const timerInterval = setInterval(() => {
+      setTurnTimeLeft((prev) => {
+        if (prev <= 1) {
+          // 0초에 도달하고 내가 현재 발언권자이면 백엔드로 turn-pass 소켓 안전 송신
+          if (gamePhase === "hint-turn" && turnSpeakerSocketId === myId) {
+            handleTurnPass();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+  }, [screen, gamePhase, turnSpeakerSocketId, myPlayerInfo]);
+
+  const [typedText, setTypedText] = useState("");
+
+  // --------------------------------------------------------------------
+  // Socket.io 실시간 통신 리스너 등록
+  // --------------------------------------------------------------------
+  useEffect(() => {
+    socket.connect();
+
+    // 1) 방 생성/입장 성공 수신
+    socket.on("room-joined", ({ room, myPlayer }) => {
+      setRoomCode(room.roomCode);
+      setRoomTitle(room.roomTitle);
+      setMaxPlayers(room.maxPlayers);
+      setLiarCount(String(room.liarCount));
+      setOnlinePlayers(room.players);
+      setMyPlayerInfo(myPlayer);
+      setIsHost(myPlayer.isHost);
+      setScreen("room");
+      setErrorMessage("");
+      setPassModalOpen(false);
+    });
+
+    // 2) 비밀번호 입력 요구 수신
+    socket.on("room-password-required", ({ roomCode, message }) => {
+      setPendingRoomCode(roomCode);
+      setPassModalOpen(true);
+      setErrorMessage(message);
+    });
+
+    // 3) 방 플레이어 목록/설정 실시간 갱신 수신 (내 ready 상태 및 힌트/토론시간 100% 동기화!)
+    socket.on("room-updated", ({ room, categories: catList }) => {
+      setOnlinePlayers(room.players);
+      setRoomTitle(room.roomTitle);
+      setMaxPlayers(room.maxPlayers);
+      if (room.hintTime) setHintTime(String(room.hintTime));
+      if (room.discussionTime) setDiscussionTime(String(room.discussionTime));
+      if (room.liarCount) setLiarCount(String(room.liarCount));
+      if (room.fastTestMode !== undefined) setFastTestMode(room.fastTestMode);
+      if (room.selectedCategory) setSelectedCategory(room.selectedCategory);
+      if (room.playerHints) setPlayerHints(room.playerHints);
+      if (catList && Array.isArray(catList)) setCategories(["ALL", ...catList]);
+
+      const me = room.players.find((p: any) => p.socketId === socket.id);
+      if (me) setMyPlayerInfo(me);
+    });
+
+    // 3-1) 실시간 힌트 히스토리 업데이트 수신 (player-hints-updated)
+    socket.on("player-hints-updated", ({ playerHints: hints }) => {
+      setPlayerHints(hints || {});
+    });
+
+    // 4) 실시간 채팅 수신 및 해당 말한 캐릭터에게만 말풍선 발동
+    socket.on("chat-received", (payload) => {
+      setChatLog((logs) => [...logs, { text: `${payload.senderName}: ${payload.text}`, time: payload.time }]);
+      setActiveSpeakerSocketId(payload.senderId);
+      setShowBubble(true);
+      if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
+      bubbleTimerRef.current = setTimeout(() => {
+        setShowBubble(false);
+        setActiveSpeakerSocketId(null);
+      }, 3000);
+    });
+
+    // 5) 게임 시작 수신 (비밀 제시어 및 라이어 수신)
+    socket.on("game-started", ({ room, category, word, isLiar, activeSpeakerSocketId }) => {
+      setOnlinePlayers(room.players);
+      setSecretCategory(category);
+      setSecretWord(word);
+      setIsLiar(isLiar);
+      setScreen("play");
+      setGamePhase("countdown");
+      setHintTime(String(room.hintTime || 20)); // 방장이 설정한 힌트 시간 100% 반영
+      setTurnSpeakerSocketId(activeSpeakerSocketId || room.players[0]?.socketId || "");
+      setEliminatedSocketIds([]);
+
+      // 이전 게임이나 라운드의 투표 결과 state들을 깨끗이 초기화
+      setFinalDecisionResult(null);
+      setFinalDecisionTarget(null);
+      setSelectedFinalDecision("");
+      setHasFinalVoted(false);
+      setVoteTallyData(null);
+      setRouletteData(null);
+
+      // 3, 2, 1 카운트다운 타이머 연출
+      setCountdownNum(3);
+      const cd1 = setTimeout(() => setCountdownNum(2), 1000);
+      const cd2 = setTimeout(() => setCountdownNum(1), 2000);
+      const cd3 = setTimeout(() => {
+        setGamePhase("notice");
+        setTurnTimeLeft(5);
+        setTypedText("");
+
+        // 한 글자씩 쳐지는 감성 타이핑 애니메이션
+        const fullMessage = "📢 선명하게 뚫려 보이는 [나의 비밀 제시어]를 확인해 주세요!";
+        let charIdx = 0;
+        const typingInterval = setInterval(() => {
+          if (charIdx < fullMessage.length) {
+            setTypedText(fullMessage.slice(0, charIdx + 1));
+            charIdx++;
+          } else {
+            clearInterval(typingInterval);
+          }
+        }, 45);
+
+        // 제시어 안내 블러 상태로 5초간 정독 머무름 ➔ 블러 해제 없이 바로 1번째 플레이어 턴 팝업 연결!
+        setTimeout(() => {
+          clearInterval(typingInterval);
+          const firstPlayer = room.players[0] || onlinePlayers[0];
+          const hTime = Number(room.hintTime) || 20;
+
+          if (firstPlayer) {
+            setSpeakerTurnNotice({
+              name: firstPlayer.name || "1번째 플레이어",
+              icon: firstPlayer.icon || "🦊",
+              timeSec: hTime,
+            });
+
+            // 1.8초 팝업 모달 후 닫히면서 비로소 배경 블러 해제 및 1번째 플레이어 발언 시작!
+            setTimeout(() => {
+              setSpeakerTurnNotice(null);
+              setGamePhase("hint-turn");
+              setTurnTimeLeft(hTime);
+              setTurnNoticeText("");
+              setIsSystemTyping(false);
+            }, 1800);
+          } else {
+            setGamePhase("hint-turn");
+            setTurnTimeLeft(hTime);
+            setTurnNoticeText("");
+            setIsSystemTyping(false);
+          }
+        }, 5000);
+      }, 3000);
+
+      return () => {
+        clearTimeout(cd1);
+        clearTimeout(cd2);
+        clearTimeout(cd3);
+      };
+    });
+
+    // 6) 턴 변경 수신 (turn-changed)
+    socket.on("turn-changed", ({ turnIndex, activeSpeakerSocketId, activeSpeakerName, hintTime: serverHintTime }) => {
+      setTurnSpeakerSocketId(activeSpeakerSocketId);
+      const sec = currentRound === 1 ? (Number(serverHintTime) || Number(hintTime) || 20) : 6;
+      setTurnTimeLeft(sec);
+
+      // 전면 블러 매 플레이어 턴 알림 팝업 1.8초간 노출!
+      const speakerPlayer = onlinePlayers.find((p) => p.socketId === activeSpeakerSocketId);
+      const speakerName = activeSpeakerName || speakerPlayer?.name || "참여자";
+      const speakerIcon = speakerPlayer?.icon || "🦊";
+
+      setSpeakerTurnNotice({
+        name: speakerName,
+        icon: speakerIcon,
+        timeSec: sec,
+      });
+
+      // 1.8초 후 전면 블러 알림 팝업 자동 닫힘
+      setTimeout(() => {
+        setSpeakerTurnNotice(null);
+      }, 1800);
+
+      if (activeSpeakerName) {
+        const fullStr = `📢 [진행자] [${activeSpeakerName}] 님의 힌트 발언 차례입니다!`;
+        let charIdx = 0;
+        setIsSystemTyping(true);
+        setTurnNoticeText("");
+
+        const tInterval = setInterval(() => {
+          if (charIdx < fullStr.length) {
+            setTurnNoticeText(fullStr.slice(0, charIdx + 1));
+            charIdx++;
+          } else {
+            clearInterval(tInterval);
+            setTimeout(() => {
+              setIsSystemTyping(false); // 진행자 멘트 완독을 위해 1.5초 간 회색 유지 후 해제
+            }, 1500);
+          }
+        }, 65);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] [${activeSpeakerName}] 님의 힌트 발언 차례입니다.`, time: "방금" },
+        ]);
+      }
+    });
+
+    // 7) 페이즈 변경 수신 (game-phase-changed)
+    socket.on("game-phase-changed", ({ phase, activeSpeakerSocketId, discussionTime: dSec, message, payload }) => {
+      setGamePhase(phase as any);
+
+      if (phase === "free-talk") {
+        setShowFreeTalkNotice(true);
+        setTurnTimeLeft(dSec || Number(discussionTime) || 40);
+
+        const freeTalkMsg = `📢 [시스템] ${dSec || discussionTime}초간 자유 토론이 시작되었습니다! 자유롭게 추리하세요.`;
+        let fIdx = 0;
+        setIsSystemTyping(true);
+        setTurnNoticeText("");
+
+        const fInterval = setInterval(() => {
+          if (fIdx < freeTalkMsg.length) {
+            setTurnNoticeText(freeTalkMsg.slice(0, fIdx + 1));
+            fIdx++;
+          } else {
+            clearInterval(fInterval);
+            setTimeout(() => {
+              setIsSystemTyping(false);
+            }, 300);
+          }
+        }, 35);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: freeTalkMsg, time: "방금" },
+        ]);
+
+        // 2.5초 후 전면 블러 안내 팝업 자동 닫힘
+        setTimeout(() => {
+          setShowFreeTalkNotice(false);
+        }, 2500);
+      }
+
+      // ── 최후변론 (final-defense) 수신: 차례 안내 모달 표시 후 타이머 시작 ──
+      if (phase === "final-defense" && payload) {
+        setTopVotedSocketIds(payload.topVotedSocketIds || []);
+        setShowPostVoteNotice(true);
+        setTurnTimeLeft(payload.timeSec || 7);
+
+        // 차례 안내 모달을 2초간 보여준 후 닫고 발언 시작
+        setTimeout(() => {
+          setShowPostVoteNotice(false);
+        }, 2000);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] ⚖️ [${payload.speakerName}] 님의 최후변론이 시작됩니다! (${payload.timeSec}초)`, time: "방금" },
+        ]);
+      }
+
+      // ── 자기 변호 (self-defense) 수신: 차례 안내 모달 표시 후 타이머 시작 ──
+      if (phase === "self-defense" && payload) {
+        setTopVotedSocketIds(payload.topVotedSocketIds || []);
+        setShowPostVoteNotice(true);
+        setTurnTimeLeft(payload.timeSec || 7);
+
+        // 차례 안내 모달을 2초간 보여준 후 닫고 발언 시작
+        setTimeout(() => {
+          setShowPostVoteNotice(false);
+        }, 2000);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] 🎤 [${payload.speakerName}] 님의 자기 변호가 시작됩니다! (${payload.currentDefenseIndex + 1}/${payload.totalDefenseCount}, ${payload.timeSec}초)`, time: "방금" },
+        ]);
+      }
+
+      // ── 투표 후 자유토론 (post-vote-free-talk) 수신: 모달 표시 + 타이머 ──
+      if (phase === "post-vote-free-talk" && payload) {
+        setPostVoteExcludedIds(payload.excludedSocketIds || []);
+        setShowPostVoteNotice(true);
+        setTurnTimeLeft(payload.timeSec || 10);
+
+        // 2초 후 모달 닫기
+        setTimeout(() => {
+          setShowPostVoteNotice(false);
+        }, 2000);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] 💬 자유토론 시작! (10초) [${payload.excludedNames}] 제외`, time: "방금" },
+        ]);
+      }
+
+      // ── 2라운드 남길 말 (last-words) 수신 ──
+      if (phase === "last-words" && payload) {
+        setShowPostVoteNotice(true);
+        setTurnTimeLeft(payload.timeSec || 5);
+
+        setTimeout(() => {
+          setShowPostVoteNotice(false);
+        }, 2000);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] 💬 [${payload.speakerName}] 님이 5초간 '남길 말'을 남깁니다!`, time: "방금" },
+        ]);
+      }
+
+      // ── 최종 결정 투표 (final-decision) 수신: 투표 모달 표시 ──
+      if (phase === "final-decision" && payload) {
+        setFinalDecisionTarget({
+          socketId: payload.targetSocketId,
+          name: payload.targetName,
+          icon: payload.targetIcon,
+        });
+        setSelectedFinalDecision("");
+        setHasFinalVoted(false);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] 🗳️ 최종 결정! [${payload.targetName}]은(는) 라이어인가요? (80% 이상 무죄 시 구제)`, time: "방금" },
+        ]);
+      }
+
+      // ── 재투표 (re-vote) 수신: 재투표 모달 표시 ──
+      if (phase === "re-vote" && payload) {
+        setReVoteCandidates(payload.candidateSocketIds || []);
+        setSelectedReVoteTarget("");
+        setHasReVoted(false);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] 🗳️ 재투표! 공동 최다 득표자 중 1명을 선택해 주세요. (${payload.candidateNames})`, time: "방금" },
+        ]);
+      }
+
+      // ── 게임 결과 (result) 수신: 결과 화면 표시 ──
+      if (phase === "result" && payload) {
+        setGameResultData(payload);
+
+        setChatLog((logs) => [
+          ...logs,
+          { text: `📢 [시스템] ${payload.resultMessage}`, time: "방금" },
+        ]);
+      }
+      
+      if (activeSpeakerSocketId !== undefined) {
+        setTurnSpeakerSocketId(activeSpeakerSocketId);
+      }
+      if (payload?.round) {
+        setCurrentRound(payload.round);
+      }
+
+      // 투표 상태 초기화 (1차 투표 또는 힌트 턴 등 새 단계 진입 시 이전 투표 결과 팝업 제거)
+      if (phase === "vote" || phase === "hint-turn" || phase === "free-talk") {
+        setSelectedVoteTarget("");
+        setHasVoted(false);
+        if (phase === "vote" || phase === "hint-turn") {
+          setFinalDecisionResult(null);
+          setFinalDecisionTarget(null);
+          setSelectedFinalDecision("");
+          setHasFinalVoted(false);
+        }
+      }
+    });
+
+    // 8) 투표 상세 표 수신 (vote-result-tally)
+    socket.on("vote-result-tally", ({ tally, voteDetails }) => {
+      setVoteTallyData({ tally, voteDetails });
+      setGamePhase("vote-result");
+    });
+
+    // 9) 룰렛 실행 결과 수신 (roulette-result)
+    socket.on("roulette-result", ({ candidateSocketIds, chosenSocketId, chosenPlayer, rouletteType }) => {
+      setRouletteData({ candidateSocketIds, chosenSocketId, chosenPlayer, rouletteType });
+      setIsRouletteSpinning(true);
+      setGamePhase("roulette");
+      
+      // 2.5초간 회전 후 당첨자 하이라이트 정지
+      setTimeout(() => {
+        setIsRouletteSpinning(false);
+      }, 2500);
+    });
+
+    // 10) 흑백 탈락 수신 (player-eliminated)
+    socket.on("player-eliminated", ({ eliminatedSocketIds }) => {
+      setEliminatedSocketIds(eliminatedSocketIds || []);
+    });
+
+    // 11) 방 에러 수신
+    socket.on("room-error", ({ message }) => {
+      setErrorMessage(message);
+    });
+
+    // 12) 최종 결정 결과 수신 (final-decision-result)
+    socket.on("final-decision-result", (data) => {
+      setFinalDecisionResult(data);
+      // 결과 화면으로는 서버가 이후 game-phase-changed로 전환해줌
+    });
+
+    // 13) 재투표 결과 수신 (re-vote-result)
+    socket.on("re-vote-result", (data) => {
+      // 재투표 결과는 서버가 자동으로 다음 플로우로 전환해줌 (단일 최다 → 최후변론, 동률 → 룰렛)
+      if (data.isTied) {
+        setChatLog((logs) => [
+          ...logs,
+          { text: "📢 [시스템] 재투표에서도 동률! 🎰 단죄 룰렛을 가동합니다!", time: "방금" },
+        ]);
+      }
+    });
+
+    // 14) 80% 무죄 판정 구제 알림 수신 (innocent-cleared-notice)
+    socket.on("innocent-cleared-notice", (data) => {
+      console.log("✨ [80% 무죄 모달 수신]", data);
+      setInnocentClearedNotice({
+        targetName: data.targetName,
+        targetIcon: data.targetIcon,
+        innocentPercent: data.innocentPercent,
+      });
+
+      // 5초간 전면 블러 무죄 구제 가독 모달을 노출한 후 닫음
+      setTimeout(() => {
+        setInnocentClearedNotice(null);
+      }, 5000);
+
+      setChatLog((logs) => [
+        ...logs,
+        { text: `📢 [시스템] ✨ 80% 이상이 [${data.targetName}] 님의 무죄를 인정하여 2라운드가 진행됩니다!`, time: "방금" },
+      ]);
+    });
+
+    return () => {
+      socket.off("room-joined");
+      socket.off("room-password-required");
+      socket.off("room-updated");
+      socket.off("chat-received");
+      socket.off("game-started");
+      socket.off("turn-changed");
+      socket.off("game-phase-changed");
+      socket.off("vote-result-tally");
+      socket.off("roulette-result");
+      socket.off("player-eliminated");
+      socket.off("room-error");
+      socket.off("final-decision-result");
+      socket.off("re-vote-result");
+      socket.off("innocent-cleared-notice");
+    };
+  }, [currentRound]);
+
+  // --------------------------------------------------------------------
+  // [초대 URL 자동 감지] 웹앱 처음 접속 시 최초 1회만 실행되는 useEffect
+  // --------------------------------------------------------------------
+  // (이전에는 라운드가 바뀔 때마다 재실행되어 초대 접속자들이 캐릭터 선택 화면으로 튕기는 버그가 있었음)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomFromUrl = params.get("room");
+    if (roomFromUrl) {
+      const code = roomFromUrl.toUpperCase();
+      setTargetRoomCode(code);
+      setJoinInputCode(code);
+      setScreen("character"); // 최초 1회 접속 시에만 캐릭터 선택 화면으로 이동
+    }
+  }, []); // 의존성 배열 []: 최초 마운트 시 1회만 동작!
+
+  // [캐릭터 생성 후 대기실 이동 / 생성 / 참여 소켓 제출 함수]
+  const handleProceedToRoom = () => {
+    if (targetRoomCode || joinInputCode) {
+      // 초대 링크 또는 방 코드로 입장하는 사용자
+      socket.emit("join-room", {
+        roomCode: targetRoomCode || joinInputCode,
+        roomPassword: passInput,
+        nickname: currentNickname,
+        portrait: myIcon,
+      });
+    } else {
+      // 새 방을 만드는 방장
+      socket.emit("create-room", {
+        roomCode: roomCode || "MANGO7",
+        roomTitle,
+        roomPassword,
+        maxPlayers,
+        liarCount,
+        hintTime,
+        discussionTime,
+        nickname: currentNickname,
+        portrait: myIcon,
+      });
+    }
+  };
+
+  // [방 참여 소켓 전송 함수]
+  const handleJoinRoom = () => {
+    if (!joinInputCode.trim()) return;
+    socket.emit("join-room", {
+      roomCode: joinInputCode,
+      roomPassword: passInput,
+      nickname: currentNickname,
+      portrait: myIcon,
+    });
+  };
+
+  // [비밀번호 제출 처리 함수]
+  const handlePassSubmit = () => {
+    socket.emit("join-room", {
+      roomCode: pendingRoomCode || joinInputCode,
+      roomPassword: passInput,
+      nickname: currentNickname,
+      portrait: myIcon,
+    });
+  };
+
+  // [준비 완료 / 취소 소켓 전송 함수]
+  const handleToggleReady = () => {
+    socket.emit("toggle-ready");
+  };
+
+  // [게임 시작 소켓 전송 함수]
+  const handleStartGame = () => {
+    socket.emit("start-game");
+  };
+
+  // [채팅 전송 소켓 함수]
+  const sendChat = () => {
+    const text = chatMessage.trim();
+    if (!text) return;
+    socket.emit("send-chat", { text });
+    setChatMessage("");
+  };
+
+  // [초대 URL 링크 복사 함수 - 상대방 접속용 Network IP 자동 적용]
+  const copyCode = () => {
+    let host = window.location.host;
+    // 내 컴에서 localhost로 들어왔더라도 친구에게 보낼 땐 네트워크 IP로 자동 변환!
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      host = `192.168.75.196:${window.location.port || 5173}`;
+    }
+    const inviteUrl = `${window.location.protocol}//${host}${window.location.pathname}?room=${roomCode}`;
+    navigator.clipboard?.writeText(inviteUrl);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  };
+
+  return (
+    <main className="app-shell">
+      {/* AI 수정 지시용 시각적 픽(Visual Inspector) 도구 부착 */}
+      <VisualInspector currentScreen={screen} />
+
+      {/* 백그라운드 디자인 요소 */}
+      <div className="orb orb-one" /><div className="orb orb-two" /><div className="grid-sparkles" />
+      
+      {/* 상단 헤더 바 */}
+      <header className="topbar">
+        <button className="brand-button" onClick={() => setScreen("home")}><Logo /></button>
+        {screen !== "home" && <div className="top-status"><span className="pulse" /> 실시간 연결됨 <span className="status-divider" /> {onlinePlayers.length}명 참여 중</div>}
+        <button className="sound-button" aria-label="소리 설정">♪</button>
+      </header>
+
+      {/* 에러 메시지 팝업 */}
+      {errorMessage && (
+        <div style={{ background: "#ff4785", color: "#fff", padding: "10px 20px", textAlign: "center", fontWeight: "bold", fontSize: "13px" }}>
+          ⚠️ {errorMessage}
+          <button style={{ marginLeft: "15px", background: "none", border: 0, color: "#fff", cursor: "pointer" }} onClick={() => setErrorMessage("")}>✕</button>
+        </div>
+      )}
+
+      {/* 1. 홈 화면 */}
+      {screen === "home" && <section className="home-screen">
+        <div className="hero-copy">
+          <p className="eyebrow">SAY IT. HIDE IT. FIND THE LIAR.</p>
+          <h1>누가 진짜<br /><strong>거짓말장인</strong>일까?</h1>
+          <p className="hero-description">모두가 같은 단어를 아는 척해요.<br />단 한 명, <b>라이어</b>만 빼고요.</p>
+          <div className="home-actions" style={{ flexDirection: "column", gap: "10px", alignItems: "flex-start" }}>
+            <button className="primary-button" onClick={() => setScreen("character")}>방 만들기 <span>→</span></button>
+            <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+              <input
+                style={{ padding: "10px 14px", borderRadius: "10px", border: "2px solid #20212b", fontWeight: "bold", textTransform: "uppercase" }}
+                placeholder="방 코드 (예: MANGO7)"
+                value={joinInputCode}
+                onChange={(e) => setJoinInputCode(e.target.value.toUpperCase())}
+              />
+              <button className="outline-button" onClick={handleJoinRoom}>방 참여 <span>→</span></button>
+            </div>
+          </div>
+          <p className="tiny-note">© dunggle</p>
+        </div>
+        <div className="hero-game" aria-label="게임 미리보기">
+          <div className="sticker sticker-top">BE SUSPICIOUS <span>✦</span></div>
+          <div className="game-card preview-card quote-card">
+            <span className="quote-mark">“</span>
+            <p>상대를 속이려면<br /><strong>나 자신마저 속여라</strong></p>
+            <b>정신 바짝차리그라!</b>
+          </div>
+          <div className="suspect-card"><span>?</span><b>누가 라이어일까요?</b><small>투표로 밝혀내세요</small></div>
+          <div className="sticker sticker-bottom">TRUST NO ONE</div>
+        </div>
+      </section>}
+
+      {/* 2. 캐릭터 설정 화면 */}
+      {screen === "character" && <section className="character-screen">
+        <div className="character-heading">
+          <p className="eyebrow">PLAYER PROFILE</p>
+          <h1>{targetRoomCode ? `[${targetRoomCode}] 방 입장하기` : "캐릭터 생성"}</h1>
+          <p>{targetRoomCode ? "게임에서 사용할 나만의 프로필을 설정해 주세요." : "나를 닮은 포트레이트와 이름을 골라주세요."}</p>
+        </div>
+        <article className="character-card">
+          <div className="character-card-head"><div><span className="card-label">STEP 01 / 01</span><h2>오늘의 나는 누구?</h2></div><span className="portrait-count">{selectedPortrait + 1} / {portraits.length}</span></div>
+          <div className="portrait-grid">{portraits.map((portrait, index) => <button key={`${portrait}-${index}`} aria-label={`${index + 1}번 포트레이트`} onClick={() => setSelectedPortrait(index)} className={selectedPortrait === index ? "portrait-choice selected" : "portrait-choice"}><span>{portrait}</span>{selectedPortrait === index && <b>선택됨</b>}</button>)}</div>
+          <div className="profile-divider" />
+          <div className="nickname-entry" style={{ flexDirection: "column", gap: "14px", alignItems: "stretch" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <label htmlFor="nickname">닉네임 입력 <small>선택</small></label>
+                <p>입력하지 않으면 <b>"{defaultNickname}"</b>(으)로 참여해요.</p>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input id="nickname" value={nickname} onChange={(event) => setNickname(event.target.value.slice(0, 12))} placeholder={defaultNickname} maxLength={12} />
+                {/* 무작위 조합 닉네임을 새로 뽑는 주사위 버튼 */}
+                <button
+                  type="button"
+                  onClick={() => setNickname(generateRandomNickname())}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    border: "2px solid #635bff",
+                    background: "#e0e0ff",
+                    color: "#4338ca",
+                    fontWeight: "bold",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "all 0.2s ease",
+                  }}
+                  title="랜덤 닉네임 추천받기"
+                >
+                  🎲 주사위
+                </button>
+              </div>
+            </div>
+            
+            {/* 방을 만들 때 비밀번호를 설정할 수 있는 필드 제공 */}
+            {!targetRoomCode && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "10px", borderTop: "1px dashed #e8e2d6" }}>
+                <div><label htmlFor="roomPassword">방 비밀번호 설정 <small>선택</small></label><p>비워두면 <b>비밀번호 없이</b> 누구나 입장할 수 있습니다.</p></div>
+                <input id="roomPassword" type="password" value={roomPassword} onChange={(event) => setRoomPassword(event.target.value)} placeholder="비밀번호 없음 (공개방)" maxLength={20} />
+              </div>
+            )}
+          </div>
+          <div className="character-actions">
+            <button className="back-button" onClick={() => setScreen("home")}>← 처음으로</button>
+            <button className="primary-button" onClick={handleProceedToRoom}>
+              {targetRoomCode ? "대기실로 입장 →" : "대기실 만들기 →"}
+            </button>
+          </div>
+        </article>
+      </section>}
+
+      {/* 3. 대기실 화면 */}
+      {screen === "room" && <section className="room-screen">
+        <div className="screen-intro"><p className="eyebrow">WAITING ROOM</p><h2>친구들을 <mark>불러모으는 중!</mark></h2><p>방 코드나 링크를 공유하면 바로 입장할 수 있어요.</p></div>
+        <div className="room-layout">
+          <article className="room-card invite-card">
+            <div className="settings-heading">
+              <span className="card-label">{isHost ? "HOST CONTROLS" : "GAME INFO"}</span>
+              <span className="host-badge">{isHost ? "👑 방장" : "참여자"}</span>
+            </div>
+
+            {/* 방장일 때만 방 제목/인원수/라운드 설정 조절 가능 */}
+            {isHost ? (
+              <>
+                <label className="field-label">방 제목<input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} /></label>
+                <label className="field-label">방 비밀번호 <span className="optional">선택</span><input type="password" value={roomPassword} onChange={(event) => setRoomPassword(event.target.value)} /></label>
+                
+                {/* 📌 제시어 주제 선택 드롭다운 */}
+                <label className="field-label">📌 제시어 주제
+                  <select
+                    value={selectedCategory}
+                    onChange={(event) => {
+                      const val = event.target.value;
+                      setSelectedCategory(val);
+                      handleUpdateRoomSettings({ selectedCategory: val });
+                    }}
+                  >
+                    <option value="ALL">🎲 전체 무작위</option>
+                    <option value="장소 / 놀거리">🏖️ 장소 / 놀거리</option>
+                    <option value="음식 / 디저트">🍔 음식 / 디저트</option>
+                    <option value="직업">💼 직업</option>
+                    <option value="동식물">🦁 동식물</option>
+                    <option value="전자제품">🔌 전자제품</option>
+                  </select>
+                </label>
+
+                <label className="field-label">최대 인원<select value={maxPlayers} onChange={(event) => setMaxPlayers(Number(event.target.value))}>{[4, 6, 8, 10, 12, 14].map((count) => <option value={count} key={count}>{count}명</option>)}</select></label>
+                <div className="rule-line" />
+                <span className="card-label">ROUND SETTINGS</span>
+                <div className="time-settings">
+                  <label>1R 힌트시간
+                    <select
+                      value={hintTime}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setHintTime(val);
+                        handleUpdateRoomSettings({ hintTime: val });
+                      }}
+                    >
+                      <option value="10">10초</option>
+                      <option value="15">15초</option>
+                      <option value="20">20초</option>
+                      <option value="30">30초</option>
+                      <option value="45">45초</option>
+                      <option value="60">60초</option>
+                    </select>
+                  </label>
+                  <label>자유토론시간
+                    <select
+                      value={discussionTime}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setDiscussionTime(val);
+                        handleUpdateRoomSettings({ discussionTime: val });
+                      }}
+                    >
+                      <option value="10">10초</option>
+                      <option value="15">15초</option>
+                      <option value="20">20초</option>
+                      <option value="30">30초</option>
+                      <option value="40">40초</option>
+                      <option value="60">60초</option>
+                    </select>
+                  </label>
+                  <label>라이어 수
+                    <select
+                      value={liarCount}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setLiarCount(val);
+                        handleUpdateRoomSettings({ liarCount: val });
+                      }}
+                    >
+                      {Array.from({ length: Math.max(1, Math.floor(maxPlayers / 2)) }, (_, i) => i + 1).map((num) => (
+                        <option key={num} value={String(num)}>{num}명</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {/* ⚡ 테스트 전용 1초 초스피드 모드 체크박스 */}
+                <div style={{ marginTop: "16px", padding: "12px", borderRadius: "12px", background: fastTestMode ? "#ffe5ee" : "#f5f0ff", border: `2px dashed ${fastTestMode ? "#ff4785" : "#635bff"}`, transition: "all 0.2s" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: isHost ? "pointer" : "default", fontWeight: "bold", fontSize: "13px", color: fastTestMode ? "#ff4785" : "#4338ca" }}>
+                    <input
+                      type="checkbox"
+                      checked={fastTestMode}
+                      disabled={!isHost}
+                      onChange={(event) => {
+                        const val = event.target.checked;
+                        setFastTestMode(val);
+                        handleUpdateRoomSettings({ fastTestMode: val });
+                      }}
+                      style={{ width: "18px", height: "18px", accentColor: "#ff4785", cursor: isHost ? "pointer" : "default" }}
+                    />
+                    ⚡ 초스피드 테스트 모드 (모든 타이머 1초)
+                  </label>
+                  <p style={{ margin: "4px 0 0 28px", fontSize: "11px", color: "#666" }}>
+                    {fastTestMode ? "🔥 모든 발언, 자유토론, 모달 대기 시간이 1초로 진행됩니다!" : "체크 시 힌트/토론/변론/모달 시간이 1초로 고속 진행됩니다."}
+                  </p>
+                </div>
+              </>
+            ) : (
+              /* 일반 참여자용 방 정보 요약 표시 */
+              <div style={{ margin: "15px 0", fontSize: "13px", lineHeight: "1.8", color: "#5a5557" }}>
+                <p><b>방 제목:</b> {roomTitle}</p>
+                <p><b>최대 인원:</b> {maxPlayers}명</p>
+                <p><b>라이어 수:</b> {liarCount}명</p>
+                <p><b>힌트 / 토론 시간:</b> {hintTime}초 / {discussionTime}초</p>
+              </div>
+            )}
+
+            <div className="code-footer"><div><span className="card-label">ROOM CODE</span><strong>{roomCode}</strong></div><button onClick={copyCode}>{copied ? "복사됨!" : "코드 복사"}</button></div>
+            <button className="link-button" onClick={copyCode}>↗ 초대 링크 공유하기</button>
+          </article>
+
+          <article className="room-card players-card">
+            <div className="card-title"><span><i className="online-dot" /> 실시간 접속자 <b>{onlinePlayers.length}</b> / {maxPlayers}</span><small>방 코드: {roomCode} · {roomTitle}</small></div>
+            
+            {/* 대기실 실시간 접속 플레이어 칩 (포트레이트 클릭 시 힌트 히스토리 팝업 모달) */}
+            <div className="players-grid">
+              {onlinePlayers.map((player) => (
+                <PlayerChip
+                  player={player}
+                  key={player.socketId || player.name}
+                  displayName={player.name}
+                  displayIcon={player.icon}
+                  speech={showBubble && player.socketId === activeSpeakerSocketId ? (chatLog.at(-1)?.text?.split(':')[1] || chatLog.at(-1)?.text) : undefined}
+                  onClick={() => setSelectedHintPlayer(player)}
+                />
+              ))}
+              {Array.from({ length: Math.max(0, maxPlayers - onlinePlayers.length) }, (_, index) => (
+                <div className="empty-seat" key={`empty-${index}`}>+<span>빈 자리</span></div>
+              ))}
+            </div>
+            
+            <div className="room-chat">
+              <div className="room-chat-head"><span>💬 실시간 대기실 채팅</span><small>모든 참여자가 볼 수 있어요</small></div>
+              <div className="room-chat-log" aria-live="polite">
+                {chatLog.length === 0 ? <p>아직 대화가 없어요. 먼저 인사해 보세요!</p> : chatLog.map((entry, index) => <div className="room-log-entry" key={`${entry.text}-${index}`}><b>{entry.text.split(':')[0]}</b><span>{entry.text.split(':')[1] || entry.text}</span><time>{entry.time}</time></div>)}
+              </div>
+              <div className="chat-compose">
+                <input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") sendChat(); }} placeholder="대기실에 메시지 보내기" maxLength={60} />
+                <button onClick={sendChat} disabled={!chatMessage.trim()}>전송</button>
+              </div>
+            </div>
+
+            <div className="ready-footer">
+              {isHost ? (
+                (() => {
+                  const isAllReady = onlinePlayers.length >= 2 && onlinePlayers.every((p) => p.isHost || p.ready);
+                  return (
+                    <>
+                      <span>
+                        {onlinePlayers.filter((p) => p.ready || p.isHost).length} / {onlinePlayers.length} 명 준비 완료!
+                      </span>
+                      <button
+                        className="primary-button small"
+                        onClick={handleStartGame}
+                        disabled={!isAllReady}
+                        style={!isAllReady ? { opacity: 0.5, cursor: "not-allowed", boxShadow: "none" } : undefined}
+                      >
+                        {onlinePlayers.length < 2
+                          ? "2명 이상 필요"
+                          : isAllReady
+                          ? "게임 시작 →"
+                          : "준비 대기 중..."}
+                      </button>
+                    </>
+                  );
+                })()
+              ) : (
+                <>
+                  <span>방장의 게임 시작을 기다리는 중입니다...</span>
+                  <button
+                    className="primary-button"
+                    onClick={handleToggleReady}
+                    style={{
+                      padding: "10px 24px",
+                      fontSize: "15px",
+                      backgroundColor: myPlayerInfo?.ready ? "#635bff" : "#e0e0ff",
+                      color: myPlayerInfo?.ready ? "#ffffff" : "#4338ca",
+                      borderColor: myPlayerInfo?.ready ? "#4f46e5" : "#c7d2fe",
+                      boxShadow: myPlayerInfo?.ready ? "0 4px 14px rgba(99,91,255,0.4)" : "none",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {myPlayerInfo?.ready ? "✓ 준비완료" : "준비"}
+                  </button>
+                </>
+              )}
+            </div>
+          </article>
+        </div>
+      </section>}
+
+      {/* 4. 게임 진행 화면 (Play Screen) */}
+      {screen === "play" && <section className="astra-game-shell">
+        {/* 전면 블러 카운트다운 & 타이핑 연출 안내 팝업 모달 */}
+        {(gamePhase === "countdown" || gamePhase === "notice") && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.65)", zIndex: 9999 }}>
+            {gamePhase === "countdown" ? (
+              <div style={{ textAlign: "center", color: "#fff", animation: "popIn 0.3s ease" }}>
+                <span className="eyebrow" style={{ color: "#ffb703", fontSize: "18px" }}>GAME STARTING</span>
+                <h1 style={{ fontSize: "96px", margin: "10px 0", textShadow: "0 0 20px rgba(255,183,3,0.8)" }}>{countdownNum}</h1>
+                <p style={{ fontSize: "20px" }}>곧 게임이 시작됩니다! 포지션을 확인하세요.</p>
+              </div>
+            ) : (
+              <div className="nickname-modal" style={{ maxWidth: "480px", width: "90%", textAlign: "center", border: "3px solid #ffb703", boxShadow: "0 0 30px rgba(255,183,3,0.4)" }}>
+                <span className="card-label" style={{ color: "#ffb703" }}>GAME NOTICE</span>
+                <h2 style={{ fontSize: "20px", margin: "10px 0 15px 0", whiteSpace: "pre-line", minHeight: "60px", lineHeight: "1.5", color: "#2b2b2b" }}>
+                  {typedText}
+                </h2>
+                <div style={{ fontSize: "13px", color: "#666", marginTop: "10px" }}>
+                  잠시 후 블러가 해제되고 1번째 플레이어부터 힌트 발언이 시작됩니다.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 자유 토론 시작 전면 블러 안내 팝업 모달 */}
+        {gamePhase === "free-talk" && showFreeTalkNotice && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.65)", zIndex: 9999 }}>
+            <div className="nickname-modal" style={{ maxWidth: "480px", width: "90%", textAlign: "center", border: "3px solid #635bff", boxShadow: "0 0 30px rgba(99,91,255,0.4)" }}>
+              <span className="card-label" style={{ color: "#635bff" }}>FREE TALK PHASE</span>
+              <h2 style={{ fontSize: "26px", margin: "10px 0 15px 0", color: "#2b2b2b" }}>
+                💬 자유 토론 시작!
+              </h2>
+              <p style={{ fontSize: "16px", color: "#555", lineHeight: "1.6" }}>
+                모든 플레이어의 힌트 발표가 끝났습니다.<br />
+                <b>{discussionTime}초간</b> 제한 없이 자유롭게 대화하며 라이어를 찾아내세요!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 매 플레이어 힌트 턴 전환 전면 블러 안내 팝업 모달 */}
+        {speakerTurnNotice && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.65)", zIndex: 9999 }}>
+            <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", textAlign: "center", border: "3px solid #ff4785", boxShadow: "0 0 35px rgba(255,71,133,0.5)", animation: "popIn 0.3s ease" }}>
+              <span className="card-label" style={{ color: "#ff4785" }}>HINT SPEAKER TURN</span>
+              <div style={{ fontSize: "64px", margin: "12px 0" }}>{speakerTurnNotice.icon}</div>
+              <h2 style={{ fontSize: "24px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
+                📢 <span style={{ color: "#ff4785" }}>[{speakerTurnNotice.name}]</span> 님의 발언 차례!
+              </h2>
+              <p style={{ fontSize: "15px", color: "#555", lineHeight: "1.5" }}>
+                제한시간 <b>{speakerTurnNotice.timeSec}초</b> 동안 힌트를 발표해 주세요.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 1차 라이어 지목 투표 제출 모달 */}
+        {gamePhase === "vote" && (
+          <div className="modal-backdrop" style={{ zIndex: 9980 }}>
+            <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%" }}>
+              <span className="card-label">LIAR VOTE PHASE</span>
+              <h2>🗳️ 라이어 지목 투표</h2>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "15px" }}>의심스러운 라이어 1명을 지목해 주세요!</p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "15px 0", maxHeight: "220px", overflowY: "auto" }}>
+                {onlinePlayers.map((player) => (
+                  <button
+                    key={`vote-choice-${player.socketId}`}
+                    onClick={() => setSelectedVoteTarget(player.socketId)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "12px 16px",
+                      borderRadius: "14px",
+                      border: selectedVoteTarget === player.socketId ? "2px solid #ff4785" : "1px solid #ddd",
+                      background: selectedVoteTarget === player.socketId ? "#ffe5ee" : "#fff",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <span style={{ fontSize: "22px" }}>{player.icon}</span>
+                    <span style={{ fontWeight: "bold", fontSize: "14px", flex: 1, textAlign: "left", color: "#2b2b2b" }}>{player.name}</span>
+                    {selectedVoteTarget === player.socketId && <b style={{ color: "#ff4785" }}>선택됨</b>}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                className="primary-button"
+                style={{ width: "100%", marginTop: "10px" }}
+                disabled={!selectedVoteTarget || hasVoted}
+                onClick={() => {
+                  socket.emit("submit-vote", { targetSocketId: selectedVoteTarget });
+                  setHasVoted(true);
+                }}
+              >
+                {hasVoted ? "투표 완료! (다른 참가자 투표 대기 중...)" : "투표 제출하기 ➔"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 상세 투표 결과 표 모달 */}
+        {gamePhase === "vote-result" && voteTallyData && (
+          <div className="modal-backdrop" style={{ zIndex: 9900 }}>
+            <div className="nickname-modal" style={{ maxWidth: "520px", width: "90%" }}>
+              <span className="card-label">VOTE RESULT TALLY</span>
+              <h2>🗳️ 상세 투표 결과 표</h2>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "15px" }}>누가 몇 표를 받았고, 누가 누구를 지목했는지 공개됩니다.</p>
+              
+              {/* 득표현황 바 그래프 */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", margin: "15px 0" }}>
+                {Object.entries(voteTallyData.tally).map(([targetId, count]) => {
+                  const targetPlayer = onlinePlayers.find(p => p.socketId === targetId);
+                  return (
+                    <div key={targetId} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ width: "80px", fontWeight: "bold", fontSize: "13px" }}>{targetPlayer?.name || "참여자"}</span>
+                      <div style={{ flex: 1, height: "14px", background: "#eee", borderRadius: "7px", overflow: "hidden" }}>
+                        <div style={{ width: `${(count / onlinePlayers.length) * 100}%`, height: "100%", background: "#ff4785" }} />
+                      </div>
+                      <span style={{ fontWeight: "bold", color: "#ff4785" }}>{count}표</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ borderTop: "1px dashed #ddd", paddingTop: "10px", marginTop: "10px" }}>
+                <small style={{ fontWeight: "bold" }}>📋 상세 지목 표:</small>
+                <div style={{ maxHeight: "120px", overflowY: "auto", fontSize: "12px", color: "#444", marginTop: "5px" }}>
+                  {voteTallyData.voteDetails.map((detail, idx) => (
+                    <div key={idx} style={{ padding: "3px 0" }}>
+                      <b>{detail.voterName}</b> ➔ 👉 <b>{detail.targetName}</b> 지목
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p style={{ fontSize: "13px", color: "#999", marginTop: "15px" }}>⬇️ 3초 후 자동으로 다음 단계로 넘어갑니다...</p>
+            </div>
+          </div>
+        )}
+
+        {/* 룰렛 (생존 / 사면 / 단죄) 회전 애니메이션 모달 */}
+        {gamePhase === "roulette" && rouletteData && (
+          <div className="modal-backdrop" style={{ zIndex: 9950 }}>
+            <div className="nickname-modal" style={{ textAlign: "center" }}>
+              <span className="card-label">🎰 ROULETTE DECISION</span>
+              <h2>{rouletteData.rouletteType === "survival" ? "🎰 生存 룰렛" : rouletteData.rouletteType === "amnesty" ? "🎰 사면 룰렛" : "🎰 단죄 룰렛"}</h2>
+              <p>{isRouletteSpinning ? "동률/부족 상황 해결을 위해 룰렛 회전 중..." : "룰렛 추첨 결과가 발표되었습니다!"}</p>
+
+              {/* 룰렛 회전 연출 박스 */}
+              <div style={{ margin: "25px 0", padding: "20px", background: "#f8f6f0", borderRadius: "16px", border: "2px solid #e8e2d6" }}>
+                <div style={{ fontSize: "54px", transform: isRouletteSpinning ? "scale(1.2)" : "scale(1)", transition: "all 0.2s" }}>
+                  {isRouletteSpinning ? "🌀" : rouletteData.chosenPlayer?.icon || "🎯"}
+                </div>
+                <h3 style={{ fontSize: "22px", margin: "10px 0", color: isRouletteSpinning ? "#999" : "#ff4785" }}>
+                  {isRouletteSpinning ? "두구두구..." : rouletteData.chosenPlayer?.name}
+                </h3>
+                <span style={{ fontSize: "13px", fontWeight: "bold", color: "#666" }}>
+                  {!isRouletteSpinning && (rouletteData.rouletteType === "condemn" ? "🚨 라이어로 결정되었습니다!" : "✨ 사면되었습니다 (살아남음)!")}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 최후변론 / 자기 변호 / 남길말 차례 안내 모달 (showPostVoteNotice 제어) ── */}
+        {showPostVoteNotice && (gamePhase === "final-defense" || gamePhase === "self-defense" || gamePhase === "post-vote-free-talk" || gamePhase === "last-words") && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.65)", zIndex: 9999 }}>
+            <div className="nickname-modal" style={{
+              maxWidth: "460px", width: "90%", textAlign: "center",
+              border: `3px solid ${gamePhase === "final-defense" || gamePhase === "last-words" ? "#ff4785" : gamePhase === "self-defense" ? "#f5b300" : "#635bff"}`,
+              boxShadow: `0 0 35px ${gamePhase === "final-defense" || gamePhase === "last-words" ? "rgba(255,71,133,0.5)" : gamePhase === "self-defense" ? "rgba(245,179,0,0.5)" : "rgba(99,91,255,0.4)"}`,
+              animation: "popIn 0.3s ease",
+            }}>
+              <span className="card-label" style={{ color: gamePhase === "final-defense" || gamePhase === "last-words" ? "#ff4785" : gamePhase === "self-defense" ? "#f5b300" : "#635bff" }}>
+                {gamePhase === "final-defense" ? "FINAL DEFENSE" : gamePhase === "self-defense" ? "SELF DEFENSE" : gamePhase === "last-words" ? "LAST WORDS" : "FREE TALK PHASE"}
+              </span>
+              {/* 발언자 아이콘 (최후변론/자기변호/남길말 시) */}
+              {(gamePhase === "final-defense" || gamePhase === "self-defense" || gamePhase === "last-words") && (
+                <div style={{ fontSize: "64px", margin: "12px 0" }}>
+                  {onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.icon || "🦊"}
+                </div>
+              )}
+              <h2 style={{ fontSize: "24px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
+                {gamePhase === "final-defense" && (
+                  <>⚖️ <span style={{ color: "#ff4785" }}>[{onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.name || "참여자"}]</span> 님의 최후변론!</>
+                )}
+                {gamePhase === "self-defense" && (
+                  <>🎤 <span style={{ color: "#f5b300" }}>[{onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.name || "참여자"}]</span> 님의 자기 변호!</>
+                )}
+                {gamePhase === "last-words" && (
+                  <>💬 <span style={{ color: "#ff4785" }}>[{onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.name || "참여자"}]</span> 님의 남길 말!</>
+                )}
+                {gamePhase === "post-vote-free-talk" && "💬 자유토론 시작!"}
+              </h2>
+              <p style={{ fontSize: "15px", color: "#555", lineHeight: "1.5" }}>
+                {gamePhase === "post-vote-free-talk"
+                  ? <>최다 득표자를 제외한 전원이 <b>10초간</b> 자유롭게 대화할 수 있습니다.</>
+                  : gamePhase === "last-words"
+                  ? <>제한시간 <b>5초</b> 동안 마지막으로 한 마디 남겨주세요!</>
+                  : <>제한시간 <b>7초</b> 동안 변론해 주세요.</>
+                }
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── 80% 무죄 구제 전면 블러 안내 모달 (5초 명확 노출 및 높은 최상단 zIndex 99999) ── */}
+        {innocentClearedNotice && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(16px)", backgroundColor: "rgba(0,0,0,0.8)", zIndex: 99999 }}>
+            <div className="nickname-modal" style={{
+              maxWidth: "500px", width: "90%", textAlign: "center",
+              border: "3px solid #10b981", boxShadow: "0 0 50px rgba(16,185,129,0.7)",
+              animation: "popIn 0.3s ease",
+            }}>
+              <span className="card-label" style={{ color: "#10b981" }}>✨ INNOCENT CLEARED</span>
+              <div style={{ fontSize: "64px", margin: "14px 0" }}>{innocentClearedNotice.targetIcon}</div>
+              <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#10b981", lineHeight: "1.4" }}>
+                80퍼센트 이상이 <span style={{ color: "#ff4785" }}>[{innocentClearedNotice.targetName}]</span> 님의 무죄를 인정하여 2라운드가 진행됩니다!
+              </h2>
+              <p style={{ fontSize: "14px", color: "#666" }}>
+                무죄 찬성률: <b>{innocentClearedNotice.innocentPercent?.toFixed(0)}%</b> (구제 성공)
+              </p>
+              <div style={{ marginTop: "18px", padding: "12px", borderRadius: "12px", background: "#cbf7e6", color: "#059669", fontWeight: "bold", fontSize: "14px" }}>
+                🔄 5초 후 2라운드 힌트 발표(각 6초)가 시작됩니다.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 최종 결정 (유죄/무죄) 투표 모달 ── */}
+        {gamePhase === "final-decision" && finalDecisionTarget && (
+          <div className="modal-backdrop" style={{ zIndex: 9980 }}>
+            <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", border: "3px solid #10b981", boxShadow: "0 0 30px rgba(16,185,129,0.4)" }}>
+              <span className="card-label" style={{ color: "#10b981" }}>FINAL DECISION</span>
+              <div style={{ fontSize: "54px", margin: "10px 0" }}>{finalDecisionTarget.icon}</div>
+              <h2 style={{ fontSize: "20px", margin: "5px 0 10px 0", color: "#2b2b2b" }}>
+                🗳️ <span style={{ color: "#ff4785" }}>[{finalDecisionTarget.name}]</span>은(는) 라이어인가요?
+              </h2>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "15px" }}>80% 이상이 무죄로 판단해야 구제(2라운드)됩니다.</p>
+
+              {/* 유죄/무죄 선택 버튼 */}
+              {(() => {
+                const myId = socket.id || myPlayerInfo?.socketId;
+                const isTarget = myId === finalDecisionTarget.socketId;
+                if (isTarget) return <p style={{ color: "#999", fontStyle: "italic" }}>🔒 본인은 투표할 수 없습니다.</p>;
+                return (
+                  <>
+                    <div style={{ display: "flex", gap: "10px", margin: "15px 0" }}>
+                      <button
+                        onClick={() => setSelectedFinalDecision("guilty")}
+                        style={{
+                          flex: 1, padding: "14px", borderRadius: "14px", cursor: "pointer", fontWeight: "bold", fontSize: "15px", transition: "all 0.2s",
+                          border: selectedFinalDecision === "guilty" ? "3px solid #ff4785" : "1px solid #ddd",
+                          background: selectedFinalDecision === "guilty" ? "#ffe5ee" : "#fff",
+                          color: selectedFinalDecision === "guilty" ? "#ff4785" : "#333",
+                        }}
+                      >
+                        🚨 유죄<br/><small>라이어로 지목</small>
+                      </button>
+                      <button
+                        onClick={() => setSelectedFinalDecision("innocent")}
+                        style={{
+                          flex: 1, padding: "14px", borderRadius: "14px", cursor: "pointer", fontWeight: "bold", fontSize: "15px", transition: "all 0.2s",
+                          border: selectedFinalDecision === "innocent" ? "3px solid #10b981" : "1px solid #ddd",
+                          background: selectedFinalDecision === "innocent" ? "#cbf7e6" : "#fff",
+                          color: selectedFinalDecision === "innocent" ? "#059669" : "#333",
+                        }}
+                      >
+                        ✅ 무죄<br/><small>2라운드 진행</small>
+                      </button>
+                    </div>
+                    <button
+                      className="primary-button"
+                      style={{ width: "100%" }}
+                      disabled={!selectedFinalDecision || hasFinalVoted}
+                      onClick={() => {
+                        socket.emit("submit-final-decision", { decision: selectedFinalDecision });
+                        setHasFinalVoted(true);
+                      }}
+                    >
+                      {hasFinalVoted ? "투표 완료! (다른 참가자 투표 대기 중...)" : "투표 제출하기 ➜"}
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ── 최종 결정 결과 모달 (유죄 확정 시에만 표시) ── */}
+        {finalDecisionResult && !finalDecisionResult.isInnocent && !innocentClearedNotice && (gamePhase === "final-decision" || gamePhase === "post-vote-free-talk" || gamePhase === "self-defense" || gamePhase === "final-defense") && (
+          <div className="modal-backdrop" style={{ zIndex: 9970 }}>
+            <div className="nickname-modal" style={{
+              maxWidth: "480px", width: "90%", textAlign: "center",
+              border: `3px solid ${finalDecisionResult.isInnocent ? "#10b981" : "#ff4785"}`,
+              boxShadow: `0 0 30px ${finalDecisionResult.isInnocent ? "rgba(16,185,129,0.4)" : "rgba(255,71,133,0.4)"}`,
+            }}>
+              <span className="card-label" style={{ color: finalDecisionResult.isInnocent ? "#10b981" : "#ff4785" }}>
+                {finalDecisionResult.isInnocent ? "INNOCENT - ROUND 2" : "GUILTY VERDICT"}
+              </span>
+              <div style={{ fontSize: "54px", margin: "10px 0" }}>{finalDecisionResult.targetIcon}</div>
+              <h2 style={{ fontSize: "22px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
+                [{finalDecisionResult.targetName}] 판정 결과
+              </h2>
+              <div style={{ display: "flex", justifyContent: "center", gap: "20px", margin: "15px 0", fontSize: "18px", fontWeight: "bold" }}>
+                <span style={{ color: "#ff4785" }}>🚨 유죄: {finalDecisionResult.guiltyCount}표</span>
+                <span style={{ color: "#10b981" }}>✅ 무죄: {finalDecisionResult.innocentCount}표</span>
+              </div>
+              <p style={{ fontSize: "14px", color: "#666" }}>
+                무죄 비율: <b>{finalDecisionResult.innocentPercent?.toFixed(0)}%</b> / 필요: 80%
+              </p>
+              <h3 style={{
+                fontSize: "20px", marginTop: "15px", padding: "12px", borderRadius: "12px",
+                background: finalDecisionResult.isInnocent ? "#cbf7e6" : "#ffe5ee",
+                color: finalDecisionResult.isInnocent ? "#059669" : "#ff4785",
+              }}>
+                {finalDecisionResult.isInnocent
+                  ? "✅ 구제! 2라운드로 진행합니다."
+                  : "🚨 유죄 확정! 라이어로 지목됩니다."
+                }
+              </h3>
+              <p style={{ fontSize: "12px", color: "#999", marginTop: "10px" }}>잠시 후 자동으로 다음 단계로 넘어갑니다...</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── 재투표 모달 (re-vote) ── */}
+        {gamePhase === "re-vote" && reVoteCandidates.length > 0 && (
+          <div className="modal-backdrop" style={{ zIndex: 9980 }}>
+            <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", border: "3px solid #ff6f3c", boxShadow: "0 0 30px rgba(255,111,60,0.4)" }}>
+              <span className="card-label" style={{ color: "#ff6f3c" }}>RE-VOTE PHASE</span>
+              <h2 style={{ fontSize: "20px", margin: "10px 0" }}>🗳️ 재투표</h2>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "15px" }}>공동 최다 득표자 중 1명을 선택해 주세요!</p>
+
+              {(() => {
+                const myId = socket.id || myPlayerInfo?.socketId;
+                const isCandidate = reVoteCandidates.includes(myId || "");
+                if (isCandidate) return <p style={{ color: "#999", fontStyle: "italic" }}>🔒 공동 최다 득표자는 투표할 수 없습니다.</p>;
+                return (
+                  <>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "10px 0", maxHeight: "200px", overflowY: "auto" }}>
+                      {reVoteCandidates.map(candidateId => {
+                        const player = onlinePlayers.find(p => p.socketId === candidateId);
+                        return (
+                          <button
+                            key={candidateId}
+                            onClick={() => setSelectedReVoteTarget(candidateId)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px",
+                              borderRadius: "14px", cursor: "pointer", transition: "all 0.2s",
+                              border: selectedReVoteTarget === candidateId ? "2px solid #ff6f3c" : "1px solid #ddd",
+                              background: selectedReVoteTarget === candidateId ? "#ffe3d1" : "#fff",
+                            }}
+                          >
+                            <span style={{ fontSize: "22px" }}>{player?.icon || "🦊"}</span>
+                            <span style={{ fontWeight: "bold", fontSize: "14px", flex: 1, textAlign: "left", color: "#2b2b2b" }}>{player?.name || "참여자"}</span>
+                            {selectedReVoteTarget === candidateId && <b style={{ color: "#ff6f3c" }}>선택됨</b>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      className="primary-button"
+                      style={{ width: "100%", marginTop: "10px" }}
+                      disabled={!selectedReVoteTarget || hasReVoted}
+                      onClick={() => {
+                        socket.emit("submit-re-vote", { targetSocketId: selectedReVoteTarget });
+                        setHasReVoted(true);
+                      }}
+                    >
+                      {hasReVoted ? "투표 완료! (대기 중...)" : "재투표 제출하기 ➜"}
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ── 게임 결과 모달 (result) ── */}
+        {gamePhase === "result" && gameResultData && (
+          <div className="modal-backdrop" style={{ zIndex: 9990 }}>
+            <div className="nickname-modal" style={{
+              maxWidth: "500px", width: "90%", textAlign: "center",
+              border: `3px solid ${gameResultData.citizenWin ? "#10b981" : "#ff4785"}`,
+              boxShadow: `0 0 40px ${gameResultData.citizenWin ? "rgba(16,185,129,0.5)" : "rgba(255,71,133,0.5)"}`,
+            }}>
+              <span className="card-label" style={{ color: gameResultData.citizenWin ? "#10b981" : "#ff4785" }}>GAME RESULT</span>
+              <h1 style={{ fontSize: "32px", margin: "15px 0", color: gameResultData.citizenWin ? "#059669" : "#ff4785" }}>
+                {gameResultData.citizenWin ? "🏆 시민 팀 승리!" : "😈 라이어 승리!"}
+              </h1>
+              <div style={{ fontSize: "48px", margin: "10px 0" }}>{gameResultData.targetIcon}</div>
+              <p style={{ fontSize: "18px", fontWeight: "bold", color: "#2b2b2b" }}>
+                [{gameResultData.targetName}]은(는) {gameResultData.isActualLiar ? "라이어였습니다!" : "라이어가 아니었습니다!"}
+              </p>
+              {gameResultData.liarNames && (
+                <p style={{ fontSize: "14px", color: "#666", marginTop: "10px" }}>
+                  진짜 라이어: <b>{gameResultData.liarNames.join(", ")}</b>
+                </p>
+              )}
+              <button className="primary-button" style={{ marginTop: "20px" }} onClick={() => {
+                setGamePhase("waiting");
+                setScreen("room");
+                setGameResultData(null);
+                setFinalDecisionResult(null);
+                setChatLog([]);
+              }}>
+                대기실로 돌아가기 ➜
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="astra-game-canvas">
+          <main className="astra-game-board">
+            {/* 상단 플레이어 줄 */}
+            <div className="astra-portrait-row" style={{ filter: isNoticeDimmed ? "grayscale(70%) opacity(0.4)" : "none", transition: "all 0.3s" }}>
+              {onlinePlayers.slice(0, 6).map((player) => {
+                const isSpeaker = showBubble && player.socketId === activeSpeakerSocketId;
+                const isTurnSpeaker = gamePhase === "hint-turn" && player.socketId === turnSpeakerSocketId;
+                const isEliminated = eliminatedSocketIds.includes(player.socketId);
+                const latestChat = chatLog.at(-1)?.text;
+
+                return (
+                  <div
+                    className="astra-player-card"
+                    key={`top-${player.socketId || player.name}`}
+                    style={{
+                      backgroundColor: isEliminated ? "#dcdcdc" : player.softColor,
+                      borderColor: isTurnSpeaker ? "#ff4785" : player.color,
+                      boxShadow: isTurnSpeaker ? "0 0 12px #ff4785" : "none",
+                      filter: isEliminated ? "grayscale(100%) opacity(0.5)" : "none",
+                    }}
+                  >
+                    <div className="astra-avatar-wrap">
+                      <Avatar type="initial" initials={player.icon} size="large" shape="square" />
+                    </div>
+                    <span className="text-label-sm text-text-primary">
+                      {player.name} {isEliminated && "(탈락)"}
+                    </span>
+                    {/* 발언자 본인 캐릭터 카드 위에만 말풍선 표시 */}
+                    {isSpeaker && latestChat && (
+                      <div className="astra-speech-bubble">{latestChat.split(':')[1] || latestChat}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* 중앙 대화 & 제시어 기록 패널 */}
+            <section className="astra-log-panel">
+              <div className="astra-log-header">
+                <div className="text-title text-text-primary">▣ 대화 기록</div>
+                {/* 턴 이동 시 진행자 통제 타이핑 알림 띠 */}
+                {turnNoticeText && (
+                  <div style={{ background: "#635bff", color: "#fff", padding: "4px 12px", borderRadius: "12px", fontSize: "12px", fontWeight: "bold" }}>
+                    {turnNoticeText}
+                  </div>
+                )}
+                {/* 대화 기록 우측 밀착 배치된 비밀 제시어 상자 (초기 블러 시 z-index 10005로 뚫리는 스포트라이트 연출) */}
+                {(() => {
+                  const isSpotlight = gamePhase === "countdown" || gamePhase === "notice";
+                  return (
+                    <div
+                      className="astra-secret-hover secret-border-blink"
+                      style={{
+                        position: "relative",
+                        zIndex: isSpotlight ? 10005 : 1,
+                        boxShadow: isSpotlight ? "0 0 35px #ff4785, 0 0 70px rgba(255,71,133,0.6)" : "none",
+                        transform: isSpotlight ? "scale(1.08)" : "scale(1)",
+                        transition: "all 0.4s ease",
+                        background: isLiar ? "#ffe0e0" : "#ffffff",
+                      }}
+                    >
+                      <span className="text-label-xs text-text-secondary">
+                        나의 비밀 제시어 [{secretCategory}]
+                      </span>
+                      <span className="astra-secret-word text-label-sm" style={isLiar ? { background: "#ff4785" } : undefined}>
+                        {secretWord}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="astra-log-body">
+                <div className="astra-prompt-pane">
+                  {/* 포트레이트, 닉네임, 메시지, 시간이 가로 한 줄(1열)로 출력되는 콤팩트 채팅 리스트 */}
+                  <div className="astra-message-list" ref={messageListRef}>
+                    {chatLog.map((entry, index) => (
+                      <div className="astra-message" key={`astra-log-${entry.text}-${index}`}>
+                        {/* 채팅 메시지 옆 아바타 아이콘 (작은 원형 스타일 적용) */}
+                        <Avatar type="initial" initials="💬" size="small" shape="circle" />
+                        <span className="astra-message-name">{entry.text.split(':')[0]}</span>
+                        <span className="astra-message-text" style={entry.text.includes("[시스템]") ? { fontWeight: "bold", color: "#635bff" } : undefined}>{entry.text.split(':')[1] || entry.text}</span>
+                        <span className="astra-message-time">{entry.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* 게임 내 입력 창 (Strict Turn 제어 & 탈락자 입력 제한 & 투표 후 플로우 채팅 제어) */}
+                  {(() => {
+                    const myId = socket.id || myPlayerInfo?.socketId;
+                    const isEliminated = eliminatedSocketIds.includes(myId || "");
+                    const isMyTurn = gamePhase === "hint-turn" && turnSpeakerSocketId === myId;
+
+                    // 최후변론/자기변호: 현재 발언자만 채팅 가능
+                    const isDefenseSpeaker = (gamePhase === "final-defense" || gamePhase === "self-defense") && turnSpeakerSocketId === myId;
+
+                    // 투표 후 자유토론: 최다 득표자(들) 제외한 나머지만 채팅 가능
+                    const isPostVoteExcluded = gamePhase === "post-vote-free-talk" && postVoteExcludedIds.includes(myId || "");
+                    const isPostVoteFreeTalkAllowed = gamePhase === "post-vote-free-talk" && !isPostVoteExcluded;
+
+                    const canChat = !isEliminated && (
+                      gamePhase === "free-talk" ||
+                      isMyTurn ||
+                      isDefenseSpeaker ||
+                      isPostVoteFreeTalkAllowed
+                    );
+                    const speakerName = onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.name || "발언자";
+
+                    return (
+                      <div className="astra-inline-composer" style={{ opacity: canChat ? 1 : 0.6 }}>
+                        <textarea
+                          value={chatMessage}
+                          onChange={(event) => setChatMessage(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && canChat) { event.preventDefault(); sendChat(); } }}
+                          placeholder={
+                            isEliminated
+                              ? "🔒 탈락하여 관전 모드입니다 (채팅 불가)."
+                              : canChat
+                              ? (gamePhase === "final-defense" || gamePhase === "self-defense")
+                                ? "변론 메시지를 입력하세요..."
+                                : "메시지를 입력하세요..."
+                              : (gamePhase === "final-defense" || gamePhase === "self-defense")
+                              ? `🔒 [${speakerName}] 님이 변론 중입니다. 발언할 수 없습니다.`
+                              : isPostVoteExcluded
+                              ? "🔒 최다 득표자는 자유토론에 참여할 수 없습니다."
+                              : `🔒 현재 [${speakerName}] 님이 발언 중입니다. 순서를 기다려주세요.`
+                          }
+                          disabled={!canChat}
+                          rows={1}
+                        />
+                        <button type="button" onClick={sendChat} disabled={!canChat || !chatMessage.trim()}>전송</button>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 현재 발언자 라이브 패널 & [발언 완료] 버튼 */}
+                <aside className="astra-live-panel" style={{ filter: isNoticeDimmed ? "grayscale(70%) opacity(0.4)" : "none", transition: "all 0.3s" }}>
+                  <span className="card-label">LIVE TURN</span>
+                  {(() => {
+                    const myId = socket.id || myPlayerInfo?.socketId;
+                    const isFreeTalk = gamePhase === "free-talk" || gamePhase === "post-vote-free-talk";
+                    const isFinalDefense = gamePhase === "final-defense";
+                    const isSelfDefense = gamePhase === "self-defense";
+                    const isDefensePhase = isFinalDefense || isSelfDefense;
+                    const currentSpeaker = onlinePlayers.find(p => p.socketId === turnSpeakerSocketId) || onlinePlayers[0];
+                    const isMyTurn = gamePhase === "hint-turn" && turnSpeakerSocketId === myId;
+
+                    return (
+                      <>
+                        <div className="live-avatar">
+                          <Avatar type="initial" initials={isFreeTalk ? "💬" : isDefensePhase ? "⚖️" : (currentSpeaker?.icon || "🦊")} size="large" shape="square" />
+                        </div>
+                        <strong>
+                          {isFreeTalk ? "전원 자유 대화"
+                           : isDefensePhase ? (currentSpeaker?.name || "참여자")
+                           : (currentSpeaker?.name || "참여자")}
+                        </strong>
+                        <span className="live-speaking" style={
+                          isFreeTalk ? { background: "#ffe5ee", color: "#ff4785" }
+                          : isFinalDefense ? { background: "#ffe5ee", color: "#ff4785" }
+                          : isSelfDefense ? { background: "#fff2c4", color: "#f5b300" }
+                          : undefined
+                        }>
+                          <i />
+                          {isFreeTalk ? "🗣️ 자유 토론 중"
+                           : isFinalDefense ? "⚖️ 최후변론 중"
+                           : isSelfDefense ? "🎤 자기 변호 중"
+                           : "🎙️ 힌트 발언 중"}
+                        </span>
+                        <div className="live-clock">00:{String(turnTimeLeft).padStart(2, "0")}</div>
+                        <small>
+                          {isFreeTalk ? "자유 토론 남은 시간"
+                           : isDefensePhase ? "변론 남은 시간"
+                           : "남은 발언 시간"}
+                        </small>
+
+                        {/* 힌트 턴 시 발언권 본인 전용 [발언 완료] 버튼 */}
+                        {gamePhase === "hint-turn" && isMyTurn && (
+                          <button
+                            className="primary-button small"
+                            style={{ marginTop: "10px", background: "#10b981", borderColor: "#059669" }}
+                            onClick={handleTurnPass}
+                          >
+                            발언 완료 ➔
+                          </button>
+                        )}
+                        <p style={{ marginTop: "8px" }}>
+                          {isFreeTalk ? "자유롭게 대화하며 라이어를 찾아내세요!"
+                           : isFinalDefense ? "최다 득표자가 최후변론을 진행하고 있습니다."
+                           : isSelfDefense ? "공동 최다 득표자가 자기 변호를 진행하고 있습니다."
+                           : "힌트를 남기고 있어요. 서로의 반응을 살펴보세요!"}
+                        </p>
+                      </>
+                    );
+                  })()}
+                </aside>
+              </div>
+            </section>
+
+            {/* 하단 플레이어 줄 */}
+            <div className="astra-portrait-row" style={{ filter: isNoticeDimmed ? "grayscale(70%) opacity(0.4)" : "none", transition: "all 0.3s" }}>
+              {onlinePlayers.slice(6, 12).map((player) => {
+                const isSpeaker = showBubble && player.socketId === activeSpeakerSocketId;
+                const isTurnSpeaker = gamePhase === "hint-turn" && player.socketId === turnSpeakerSocketId;
+                const isEliminated = eliminatedSocketIds.includes(player.socketId);
+                const latestChat = chatLog.at(-1)?.text;
+
+                return (
+                  <div
+                    className="astra-player-card"
+                    key={`bottom-${player.socketId || player.name}`}
+                    style={{
+                      backgroundColor: isEliminated ? "#dcdcdc" : player.softColor,
+                      borderColor: isTurnSpeaker ? "#ff4785" : player.color,
+                      boxShadow: isTurnSpeaker ? "0 0 12px #ff4785" : "none",
+                      filter: isEliminated ? "grayscale(100%) opacity(0.5)" : "none",
+                    }}
+                  >
+                    <div className="astra-avatar-wrap">
+                      <Avatar type="initial" initials={player.icon} size="large" shape="square" />
+                    </div>
+                    <span className="text-label-sm text-text-primary">
+                      {player.name} {isEliminated && "(탈락)"}
+                    </span>
+                    {isSpeaker && latestChat && (
+                      <div className="astra-speech-bubble">{latestChat.split(':')[1] || latestChat}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </main>
+        </div>
+      </section>}
+
+      {/* 닉네임 수정 모달 팝업 */}
+      {editingNickname && (
+        <div className="modal-backdrop" onClick={() => setEditingNickname(false)}>
+          <div className="nickname-modal" onClick={(event) => event.stopPropagation()}>
+            <button className="close" onClick={() => setEditingNickname(false)}>×</button>
+            <span className="card-label">NICKNAME EDIT</span>
+            <h2>내 이름을 정해줘!</h2>
+            <div style={{ display: "flex", gap: "8px", margin: "10px 0" }}>
+              <input
+                autoFocus
+                value={nickname}
+                onChange={(event) => setNickname(event.target.value.slice(0, 12))}
+                placeholder={defaultNickname}
+                maxLength={12}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => setNickname(generateRandomNickname())}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "10px",
+                  border: "2px solid #635bff",
+                  background: "#e0e0ff",
+                  color: "#4338ca",
+                  fontWeight: "bold",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                🎲 주사위
+              </button>
+            </div>
+            <p>입력하지 않으면 기본 닉네임 <b>"{defaultNickname}"</b>(으)로 보여요.</p>
+            <button className="primary-button" style={{ marginTop: "10px" }} onClick={() => setEditingNickname(false)}>저장하기 <span>→</span></button>
+          </div>
+        </div>
+      )}
+
+      {/* 비밀번호 입력 모달 팝업 */}
+      {passModalOpen && (
+        <div className="modal-backdrop" onClick={() => setPassModalOpen(false)}>
+          <div className="nickname-modal" onClick={(event) => event.stopPropagation()}>
+            <button className="close" onClick={() => setPassModalOpen(false)}>×</button>
+            <span className="card-label">ROOM PASSWORD</span>
+            <h2>비밀번호 입력</h2>
+            <p>이 방에 입장하려면 비밀번호가 필요합니다.</p>
+            <input
+              type="password"
+              autoFocus
+              value={passInput}
+              onChange={(event) => setPassInput(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") handlePassSubmit(); }}
+              placeholder="비밀번호 입력"
+            />
+            <button className="primary-button" style={{ marginTop: "15px" }} onClick={handlePassSubmit}>
+              방 입장하기 <span>→</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 💡 플레이어 힌트 히스토리 보기 모달 ── */}
+      {selectedHintPlayer && (
+        <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setSelectedHintPlayer(null)}>
+          <div className="nickname-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "460px", width: "90%", border: `3px solid ${selectedHintPlayer.color || "#635bff"}`, boxShadow: `0 0 30px ${selectedHintPlayer.softColor || "rgba(99,91,255,0.4)"}` }}>
+            <button className="close" onClick={() => setSelectedHintPlayer(null)}>×</button>
+            <span className="card-label" style={{ color: selectedHintPlayer.color || "#635bff" }}>PLAYER HINT HISTORY</span>
+            <div style={{ fontSize: "56px", margin: "10px 0" }}>{selectedHintPlayer.icon}</div>
+            <h2 style={{ fontSize: "20px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
+              <span style={{ color: selectedHintPlayer.color || "#635bff" }}>[{selectedHintPlayer.name}]</span> 님의 힌트 제출 기록
+            </h2>
+            
+            <div style={{ textAlign: "left", background: "#f8fafc", padding: "16px", borderRadius: "14px", border: "1px solid #e2e8f0", margin: "15px 0", maxHeight: "250px", overflowY: "auto" }}>
+              {(() => {
+                const hints = playerHints[selectedHintPlayer.socketId || ""] || [];
+                if (hints.length === 0) {
+                  return <p style={{ color: "#94a3b8", fontStyle: "italic", textAlign: "center", margin: "10px 0" }}>아직 제출한 힌트가 없습니다. 💬</p>;
+                }
+                return hints.map((h: any, idx: number) => (
+                  <div key={idx} style={{ marginBottom: "12px", paddingBottom: "10px", borderBottom: idx < hints.length - 1 ? "1px dashed #cbd5e1" : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: "bold", color: "#64748b", marginBottom: "4px" }}>
+                      <span>{h.round === 2 ? "🔄 2라운드 힌트" : "💬 1라운드 힌트"}</span>
+                      <span style={{ fontSize: "11px", color: "#94a3b8" }}>{h.time}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: "15px", fontWeight: "bold", color: "#1e293b", background: "#fff", padding: "10px 14px", borderRadius: "10px", border: "1px solid #cbd5e1" }}>
+                      "{h.text}"
+                    </p>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <button className="primary-button" style={{ width: "100%" }} onClick={() => setSelectedHintPlayer(null)}>
+              확인 완료 <span>✓</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 80% 무죄 구제 전면 블러 안내 모달 (독립 최상위 레이어 zIndex 999999 & 5초 멈춤 노출) ── */}
+      {innocentClearedNotice && (
+        <div className="modal-backdrop" style={{ backdropFilter: "blur(20px)", backgroundColor: "rgba(0,0,0,0.85)", zIndex: 999999 }}>
+          <div className="nickname-modal" style={{
+            maxWidth: "500px", width: "90%", textAlign: "center",
+            border: "3px solid #10b981", boxShadow: "0 0 60px rgba(16,185,129,0.8)",
+            animation: "popIn 0.3s ease",
+          }}>
+            <span className="card-label" style={{ color: "#10b981", fontSize: "12px", letterSpacing: "2px" }}>✨ INNOCENT CLEARED</span>
+            <div style={{ fontSize: "72px", margin: "16px 0" }}>{innocentClearedNotice.targetIcon}</div>
+            <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#10b981", lineHeight: "1.4" }}>
+              80퍼센트 이상이 <span style={{ color: "#ff4785", textDecoration: "underline" }}>[{innocentClearedNotice.targetName}]</span> 님의 무죄를 인정하여 2라운드가 진행됩니다!
+            </h2>
+            <p style={{ fontSize: "15px", color: "#555", margin: "10px 0" }}>
+              무죄 찬성률: <b style={{ color: "#10b981", fontSize: "18px" }}>{innocentClearedNotice.innocentPercent?.toFixed(0)}%</b> (구제 성공)
+            </p>
+            <div style={{ marginTop: "20px", padding: "14px", borderRadius: "14px", background: "#cbf7e6", color: "#059669", fontWeight: "bold", fontSize: "14px" }}>
+              🔄 5초 후 2라운드 힌트 발표(각 6초)가 시작됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
