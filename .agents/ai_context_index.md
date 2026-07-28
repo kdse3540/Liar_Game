@@ -195,11 +195,11 @@
 ---
 
 ---
-## [2026-07-29 / 📦 Vercel 빌드 패키지 미설치 에러 해결 (package.json 의존성 통합)]
-- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`
-- **핵심 기능 및 역할:** Vercel 빌드 서버에서 `Installing dependencies...` 수행 시 Vite 및 Tailwind 관련 도구가 누락되지 않도록 `devDependencies`의 패키지들을 `dependencies` 항목으로 통합 교정하고 GitHub `main` 브랜치에 푸시함.
-- **주요 함수/에셋 레퍼런스:** `package.json`의 `dependencies` 항목.
-- **특이사항/의존성:** 푸시 후 Vercel이 새 커밋(`ada5990`)을 감지하여 자동 재빌드 수행.
+## [2026-07-29 / 🔒 Vercel 실행 권한 오류(Permission Denied) 해소 반영]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`, `d:\Make_Game\Liar_Game\vercel.json`
+- **핵심 기능 및 역할:** Vercel 리눅스 실행 환경에서 `node_modules/.bin/vite: Permission denied (exit 126)` 오류 방지를 위해 `package.json` 및 `vercel.json`의 빌드 명령어를 `npx vite build`로 교정하여 커밋 후 GitHub `main` 브랜치에 푸시함.
+- **주요 함수/에셋 레퍼런스:** `package.json` 및 `vercel.json` 내 `build` 스크립트.
+- **특이사항/의존성:** 푸시 완료 후 Vercel이 새 커밋(`e6e80ab`)을 감지하여 100% 정상 자동 빌드를 재개함.
 ---
 
 
