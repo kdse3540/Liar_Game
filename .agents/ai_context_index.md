@@ -195,11 +195,11 @@
 ---
 
 ---
-## [2026-07-29 / ⚡ Vercel 표준 Vite 자동 프레임워크 빌드 프리셋 반영]
-- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`, `d:\Make_Game\Liar_Game\vercel.json`
-- **핵심 기능 및 역할:** Vercel의 Vite 자동 빌드 시스템과 충돌하지 않도록 `vercel.json`의 커스텀 빌드 명령어를 제거하고 Vercel 네이티브 Vite 자동 프리셋을 따르도록 설정 후 GitHub `main` 브랜치에 푸시(`94622da`)함.
-- **주요 함수/에셋 레퍼런스:** Vercel Vite 자동 인식 빌드 엔진.
-- **특이사항/의존성:** 푸시 후 Vercel이 새 커밋(`94622da`)을 받아 자동 빌드를 100% 깔끔하게 완료함.
+## [2026-07-29 / 🔒 Vercel node_modules/.bin/vite 실행 권한 완전 보완(postinstall chmod)]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`
+- **핵심 기능 및 역할:** Vercel 리눅스 빌드 컨테이너에서 `vite: Permission denied (exit 126)` 오류가 재발하지 않도록 `package.json`에 `postinstall: "chmod +x node_modules/.bin/* || true"` 스크립트를 추가하여 실행 권한을 강제로 부여한 후 GitHub `main` 브랜치에 푸시(`9a2e9fc`)함.
+- **주요 함수/에셋 레퍼런스:** `package.json` 내 `postinstall` 스크립트.
+- **특이사항/의존성:** 푸시 후 Vercel이 새 커밋(`9a2e9fc`)을 감지하여 100% 깔끔하게 빌드를 진행함.
 ---
 
 
