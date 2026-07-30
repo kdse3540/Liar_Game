@@ -110,7 +110,7 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 1. 방 만들기 (create-room)
   // ------------------------------------------------------------------
-  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, nickname, portrait }) => {
+  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, defenseTime, nickname, portrait }) => {
     const code = (roomCode || "MANGO7").toUpperCase().trim();
     
     // 방 생성
@@ -123,6 +123,7 @@ io.on("connection", (socket) => {
       ready: true, // 방장은 기본 ready
       color: hostColor.color,
       softColor: hostColor.softColor,
+      stats: { citizenWin: 0, liarWin: 0, citizenLoss: 0, liarLoss: 0 }, // 실시간 누적 전적 초기화
     };
 
     rooms[code] = {
@@ -133,9 +134,8 @@ io.on("connection", (socket) => {
       liarCount: Number(liarCount) || 1,
       hintTime: Number(hintTime) || 20,
       discussionTime: Number(discussionTime) || 40,
-      defenseTime: 45,
+      defenseTime: Number(defenseTime) || 45,
       players: [hostPlayer],
-      gameState: "waiting",
       currentWordInfo: null,
       liarSocketIds: [],
     };
@@ -189,6 +189,7 @@ io.on("connection", (socket) => {
       ready: false,
       color: playerColor.color,
       softColor: playerColor.softColor,
+      stats: { citizenWin: 0, liarWin: 0, citizenLoss: 0, liarLoss: 0 }, // 실시간 누적 전적 초기화
     };
 
     room.players.push(newPlayer);
@@ -209,7 +210,7 @@ io.on("connection", (socket) => {
     io.to(code).emit("room-updated", { room });
   });
 
-  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, fastTestMode, selectedCategory }) => {
+  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, defenseTime, fastTestMode, selectedCategory }) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
     if (!room) return;
@@ -224,10 +225,11 @@ io.on("connection", (socket) => {
     if (liarCount !== undefined) room.liarCount = Number(liarCount);
     if (hintTime !== undefined) room.hintTime = Number(hintTime);
     if (discussionTime !== undefined) room.discussionTime = Number(discussionTime);
+    if (defenseTime !== undefined) room.defenseTime = Number(defenseTime);
     if (fastTestMode !== undefined) room.fastTestMode = Boolean(fastTestMode);
     if (selectedCategory !== undefined) room.selectedCategory = selectedCategory;
 
-    console.log(`⚙️ [방 설정 변경] 방: ${code}, 힌트시간: ${room.hintTime}초, 주제: ${room.selectedCategory}`);
+    console.log(`⚙️ [방 설정 변경] 방: ${code}, 힌트시간: ${room.hintTime}초, 변론시간: ${room.defenseTime}초, 주제: ${room.selectedCategory}`);
 
     io.to(code).emit("room-updated", { room, categories: getCategories() });
   });
@@ -250,9 +252,16 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 4. 실시간 메시지 전송 및 말풍선 브로드캐스트 (send-chat)
   // ------------------------------------------------------------------
-  socket.on("send-chat", ({ text }) => {
-    const code = socket.data.roomCode;
-    const room = rooms[code];
+  socket.on("send-chat", ({ text, roomCode }) => {
+    const code = (roomCode || socket.data.roomCode || "").toUpperCase().trim();
+    let room = rooms[code];
+
+    // 방 코드가 미매칭되면 소켓이 소속된 방을 역추적
+    if (!room) {
+      const foundCode = Object.keys(rooms).find((c) => rooms[c].players.some((p) => p.socketId === socket.id));
+      if (foundCode) room = rooms[foundCode];
+    }
+
     if (!room || !text.trim()) return;
 
     // 탈락자는 채팅권 박탈 (관전자)
@@ -270,22 +279,24 @@ io.on("connection", (socket) => {
       time: "방금",
     };
 
-    // 힌트 턴 중 발언자의 메시지이면 playerHints에 라운드별 힌트 기록!
-    if (room.phase === "hint-turn" && socket.id === room.activeSpeakerSocketId) {
-      if (!room.playerHints) room.playerHints = {};
-      if (!room.playerHints[socket.id]) room.playerHints[socket.id] = [];
-      
-      room.playerHints[socket.id].push({
-        round: room.round || 1,
-        text: text.trim(),
-        time: "방금",
-      });
-
-      io.to(code).emit("player-hints-updated", { playerHints: room.playerHints });
+    // 실시간 채팅 메시지를 해당 유저의 playerHints에 복합 키(socketId, name)로 즉각 누적 연동!
+    if (!room.playerHints) room.playerHints = {};
+    const hintKey = sender ? sender.socketId : socket.id;
+    if (!room.playerHints[hintKey]) room.playerHints[hintKey] = [];
+    if (sender && sender.name && !room.playerHints[sender.name]) {
+      room.playerHints[sender.name] = room.playerHints[hintKey];
     }
 
+    room.playerHints[hintKey].push({
+      round: room.round || 1,
+      text: text.trim(),
+      time: "방금",
+    });
+
+    io.to(room.roomCode).emit("player-hints-updated", { playerHints: room.playerHints });
+
     // 방의 모든 클라이언트에게 실시간 수신
-    io.to(code).emit("chat-received", chatPayload);
+    io.to(room.roomCode).emit("chat-received", chatPayload);
   });
 
   // ------------------------------------------------------------------
@@ -339,6 +350,12 @@ io.on("connection", (socket) => {
     room.activeSpeakerSocketId = room.players[0]?.socketId || "";
     room.votes = {};
     room.eliminatedSocketIds = []; // 탈락자 목록 (흑백 & 채팅권 박탈)
+
+    // 매 판 시작 시 인당 아이템 4종(토마토, 달걀, 물풍선, 바나나) 각 2개씩 지급 및 오염 청소
+    room.players.forEach((p) => {
+      p.inventory = { tomato: 2, egg: 2, water: 2, banana: 2 };
+      p.stains = [];
+    });
 
     // 5) 각 플레이어에게 개별 역할 및 비밀 제시어 송신
     room.players.forEach((p) => {
@@ -1015,10 +1032,31 @@ io.on("connection", (socket) => {
     const room = rooms[code];
     if (!room) return;
 
-    const targetPlayer = room.players.find(p => p.socketId === targetSocketId);
-    const isActualLiar = room.liarSocketIds.includes(targetSocketId);
+    // 참가자별 실제 승패 누적 카운트업
+    room.players.forEach(p => {
+      if (!p.stats) {
+        p.stats = { citizenWin: 0, liarWin: 0, citizenLoss: 0, liarLoss: 0 };
+      }
+      const isLiarPlayer = room.liarSocketIds.includes(p.socketId);
+      
+      if (isActualLiar) {
+        // 시민 팀 승리!
+        if (isLiarPlayer) {
+          p.stats.liarLoss += 1;
+        } else {
+          p.stats.citizenWin += 1;
+        }
+      } else {
+        // 라이어 팀 승리!
+        if (isLiarPlayer) {
+          p.stats.liarWin += 1;
+        } else {
+          p.stats.citizenLoss += 1;
+        }
+      }
+    });
 
-    console.log(`🎭 [결과 공개] ${targetPlayer?.name}: ${isActualLiar ? "라이어 맞음! 시민 승리!" : "라이어 아님! 라이어 승리!"}`);
+    console.log(`🎭 [결과 공개 & 전적 누적 완료] ${targetPlayer?.name}: ${isActualLiar ? "라이어 맞음! 시민 승리!" : "라이어 아님! 라이어 승리!"}`);
 
     room.phase = "result";
     room.gameState = "waiting"; // 게임 종료
@@ -1039,7 +1077,77 @@ io.on("connection", (socket) => {
           : `😈 라이어 승리! [${targetPlayer?.name}]은(는) 라이어가 아니었습니다!`,
       },
     });
+
+    // 갱신된 전적 포함 방 상태 실시간 브로드캐스트
+    io.to(code).emit("room-updated", {
+      room: {
+        roomCode: room.roomCode,
+        roomTitle: room.roomTitle,
+        maxPlayers: room.maxPlayers,
+        liarCount: room.liarCount,
+        hintTime: room.hintTime,
+        discussionTime: room.discussionTime,
+        fastTestMode: room.fastTestMode,
+        selectedCategory: room.selectedCategory,
+        playerHints: room.playerHints,
+        players: room.players,
+      },
+      categories: getCategories(),
+    });
   }
+
+  // ------------------------------------------------------------------
+  // 5-3k. 실시간 과일/아이템 투척 처리 (throw-item)
+  // ------------------------------------------------------------------
+  socket.on("throw-item", ({ targetId, itemType, roomCode }) => {
+    const code = (roomCode || socket.data.roomCode || "").toUpperCase().trim();
+    let room = rooms[code];
+
+    if (!room) {
+      const foundCode = Object.keys(rooms).find((c) => rooms[c].players.some((p) => p.socketId === socket.id));
+      if (foundCode) room = rooms[foundCode];
+    }
+
+    if (!room) return;
+
+    const sender = room.players.find((p) => p.socketId === socket.id || p.name === socket.data.nickname);
+    const target = room.players.find((p) => p.socketId === targetId || p.name === targetId);
+
+    if (!sender || !target) {
+      console.log(`⚠️ [아이템 투척 대상 미발견] sender: ${sender?.name}, targetId: ${targetId}`);
+      return;
+    }
+
+    // 인당 아이템 재고 수량 확인
+    if (!sender.inventory) {
+      sender.inventory = { tomato: 2, egg: 2, water: 2, banana: 2 };
+    }
+
+    if ((sender.inventory[itemType] || 0) <= 0) {
+      return socket.emit("room-error", { message: "해당 아이템을 모두 소진하였습니다! (매 판당 각 2개 제공)" });
+    }
+
+    // 아이템 수량 1 차감
+    sender.inventory[itemType] -= 1;
+
+    // 대상 유저에게 지속 오염 자국(Stain) 추가
+    if (!target.stains) target.stains = [];
+    target.stains.push({ type: itemType, timestamp: Date.now() });
+
+    console.log(`🍎 [아이템 투척] 방: ${code}, ${sender.name} ➔ ${target.name}에게 ${itemType} 투척 (남은수량: ${sender.inventory[itemType]})`);
+
+    // 방 참가자 전원에게 3D 궤적 날아감 & 충돌 스플래시 브로드캐스트
+    io.to(code).emit("item-thrown", {
+      senderId: socket.id || sender.socketId,
+      senderName: sender.name,
+      senderIcon: sender.icon,
+      targetId: target.socketId || target.name,
+      targetName: target.name,
+      itemType,
+      senderInventory: sender.inventory,
+      targetStains: target.stains,
+    });
+  });
 
   // ------------------------------------------------------------------
   // 5-4. 룰렛 랜덤 추첨 (trigger-roulette)

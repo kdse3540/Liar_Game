@@ -34,6 +34,38 @@ const defaultPlayers = [
   { name: "단추", icon: "🐹", ready: true, color: "#ff4785", softColor: "#ffdbe8" },
 ];
 
+// 플레이어 시민/라이어 실시간 전적(승패) 및 대표 업적 칭호 산출 헬퍼 함수
+function getPlayerRecord(player: any) {
+  const citizenWin = player?.stats?.citizenWin ?? 0;
+  const liarWin = player?.stats?.liarWin ?? 0;
+  const citizenLoss = player?.stats?.citizenLoss ?? 0;
+  const liarLoss = player?.stats?.liarLoss ?? 0;
+  
+  const totalGames = citizenWin + liarWin + citizenLoss + liarLoss;
+  const totalWins = citizenWin + liarWin;
+  const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+  
+  // 전적 기반 업적 칭호 배정
+  let title = "🐣 풋풋한 입문 플레이어";
+  if (totalGames === 0) title = "🌱 첫 승리 도전 중!";
+  else if (winRate >= 75) title = "👑 연기파 최고 존엄";
+  else if (liarWin >= 5) title = "🦊 전설의 뻔뻔 라이어";
+  else if (citizenWin >= 8) title = "🔍 Sharpshooter 명탐정";
+  else if (winRate >= 50) title = "⚖️ 냉철한 승부사";
+  else title = "🐣 풋풋한 탐정 지망생";
+
+  return {
+    citizenWin,
+    liarWin,
+    citizenLoss,
+    liarLoss,
+    totalGames,
+    totalWins,
+    winRate,
+    title,
+  };
+}
+
 function Logo() {
   return <div className="logo" aria-label="라이어 게임"><span>LIAR</span><b>GAME</b><i>!</i></div>;
 }
@@ -44,6 +76,7 @@ function PlayerChip({
   displayName,
   displayIcon,
   speech,
+  isActiveSpeaker,
   onEdit,
   onClick,
 }: {
@@ -52,6 +85,7 @@ function PlayerChip({
   displayName?: string;
   displayIcon?: string;
   speech?: string;
+  isActiveSpeaker?: boolean;
   onEdit?: () => void;
   onClick?: () => void;
 }) {
@@ -64,11 +98,11 @@ function PlayerChip({
         ...(compact ? {} : { backgroundColor: player.softColor, borderColor: player.color }),
         cursor: onClick ? "pointer" : "default",
       }}
-      title={onClick ? "클릭 시 이 유저의 힌트 제출 기록 보기" : undefined}
+      title={onClick ? "클릭 시 이 유저의 프로필 전적 보기" : undefined}
     >
       {speech && (
         <div
-          className="player-speech"
+          className={`player-speech ${isActiveSpeaker ? "active-speaker" : ""}`}
           style={{ backgroundColor: player.softColor, borderColor: player.color, "--speech-bg": player.softColor } as CSSProperties}
         >
           {speech}
@@ -117,13 +151,14 @@ export default function App() {
   const [chatMessage, setChatMessage] = useState("");
   const [chatLog, setChatLog] = useState<{ text: string; time: string }[]>([]);
   
-  // 캐릭터 머리 위 말풍선 3초 표시 제어용 State & 발신자 소켓 ID & Timer Ref
-  const [showBubble, setShowBubble] = useState(false);
+  // 캐릭터 머리 위 말풍선 개별 3초 표시 제어용 State 맵 & 발신자 소켓 ID & Timers Ref
+  const [userSpeechMap, setUserSpeechMap] = useState<Record<string, string>>({});
+  const userSpeechTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [activeSpeakerSocketId, setActiveSpeakerSocketId] = useState<string | null>(null);
-  const bubbleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 채팅창 자동 스크롤 제어용 Ref
+  // 채팅창 자동 스크롤 제어용 Ref (대기실 및 게임 화면)
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const roomChatLogRef = useRef<HTMLDivElement | null>(null);
   
   // 방 설정 정보
   const [roomCode, setRoomCode] = useState("MANGO7");
@@ -138,6 +173,13 @@ export default function App() {
   const [fastTestMode, setFastTestMode] = useState<boolean>(false); // 테스트용 초스피드 모드 (모든 타이머 1초)
   const [playerHints, setPlayerHints] = useState<Record<string, Array<{ round: number; text: string; time: string }>>>({}); // 각 유저별 힌트 기록
   const [selectedHintPlayer, setSelectedHintPlayer] = useState<any>(null); // 힌트 모달에 띄울 유저
+  const [selectedProfilePlayer, setSelectedProfilePlayer] = useState<any>(null); // 프로필/업적/전적 모달에 띄울 유저
+  // 🍎 과일/아이템 투척 및 포트레이트 지속 오염 State
+  const [myInventory, setMyInventory] = useState<Record<string, number>>({ tomato: 2, egg: 2, water: 2, banana: 2 });
+  const [playerStainsMap, setPlayerStainsMap] = useState<Record<string, Array<{ type: string; id: string; x: number; y: number; rotate: number }>>>({});
+  const [hitBadgeMap, setHitBadgeMap] = useState<Record<string, { senderIcon: string; senderName: string } | null>>({});
+  const [itemTargetPlayer, setItemTargetPlayer] = useState<any>(null); // 과일 투척 메뉴 휠 모달에 띄울 유저
+  const [flyingProjectiles, setFlyingProjectiles] = useState<Array<{ id: string; itemType: string; startX: number; startY: number; endX: number; endY: number }>>([]);
   const [copied, setCopied] = useState(false);
   const [selectedVote, setSelectedVote] = useState("밤비");
   const [timer, setTimer] = useState(78);
@@ -146,8 +188,11 @@ export default function App() {
   const currentNickname = nickname.trim() || defaultNickname;
   const myIcon = portraits[selectedPortrait] || "🦊";
 
-  // 메시지 전송 시 자동 최하단 스크롤
+  // 새 채팅 메시지 추가 시 대기실 및 플레이 화면 채팅창을 최하단(최신 메시지)으로 자동 스크롤
   useEffect(() => {
+    if (roomChatLogRef.current) {
+      roomChatLogRef.current.scrollTop = roomChatLogRef.current.scrollHeight;
+    }
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
@@ -298,6 +343,7 @@ export default function App() {
       setMaxPlayers(room.maxPlayers);
       if (room.hintTime) setHintTime(String(room.hintTime));
       if (room.discussionTime) setDiscussionTime(String(room.discussionTime));
+      if (room.defenseTime) setDefenseTime(String(room.defenseTime));
       if (room.liarCount) setLiarCount(String(room.liarCount));
       if (room.fastTestMode !== undefined) setFastTestMode(room.fastTestMode);
       if (room.selectedCategory) setSelectedCategory(room.selectedCategory);
@@ -313,16 +359,117 @@ export default function App() {
       setPlayerHints(hints || {});
     });
 
-    // 4) 실시간 채팅 수신 및 해당 말한 캐릭터에게만 말풍선 발동
+    // 4) 실시간 채팅 수신 (각 유저별 독립 3초 말풍선 타이머 제어 - 다른 유저 말풍선 지워짐 100% 방지!)
     socket.on("chat-received", (payload) => {
       setChatLog((logs) => [...logs, { text: `${payload.senderName}: ${payload.text}`, time: payload.time }]);
       setActiveSpeakerSocketId(payload.senderId);
-      setShowBubble(true);
-      if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
-      bubbleTimerRef.current = setTimeout(() => {
-        setShowBubble(false);
-        setActiveSpeakerSocketId(null);
-      }, 3000);
+
+      const senderId = payload.senderId;
+      if (senderId) {
+        // 해당 발신 유저의 말풍선 텍스트 개별 갱신
+        setUserSpeechMap((prev) => ({ ...prev, [senderId]: payload.text }));
+
+        // 해당 발신 유저의 기존 3초 타이머만 개별 리셋 (다른 유저의 말풍선 타이머는 절대 건드리지 않음!)
+        if (userSpeechTimersRef.current[senderId]) {
+          clearTimeout(userSpeechTimersRef.current[senderId]);
+        }
+
+        // 3초 후 "해당 유저의 말풍선만" 깔끔하게 소멸
+        userSpeechTimersRef.current[senderId] = setTimeout(() => {
+          setUserSpeechMap((prev) => {
+            const next = { ...prev };
+            delete next[senderId];
+            return next;
+          });
+        }, 3000);
+      }
+    });
+
+    // 4-1) 과일/아이템 실시간 투척 수신 및 3D 궤적 애니메이션 / 충돌 스플래시 / 지속 오염 처리
+    socket.on("item-thrown", ({ senderId, senderName, senderIcon, targetId, targetName, itemType, senderInventory }) => {
+      const myId = socket.id || myPlayerInfo?.socketId;
+      const isMe = senderId === myId || senderName === myPlayerInfo?.name;
+
+      // 내가 던진 경우 내 인벤토리 재고 수량 1차감 실시간 갱신!
+      if (isMe && senderInventory) {
+        setMyInventory(senderInventory);
+      }
+
+      // 화면에서 발신자 칩과 수신자 칩의 DOM Rect 위치 구하기
+      const senderEl =
+        document.querySelector(`[data-socket-id="${senderId}"]`) ||
+        document.querySelector(`[data-player-name="${senderName}"]`) ||
+        document.querySelector(`.astra-player-card`);
+
+      const targetEl =
+        document.querySelector(`[data-socket-id="${targetId}"]`) ||
+        document.querySelector(`[data-player-name="${targetName}"]`);
+
+      let startX = window.innerWidth / 2;
+      let startY = window.innerHeight / 2;
+      let endX = window.innerWidth / 2;
+      let endY = window.innerHeight / 2;
+
+      if (senderEl) {
+        const rect = senderEl.getBoundingClientRect();
+        startX = rect.left + rect.width / 2;
+        startY = rect.top + rect.height / 2;
+      }
+      if (targetEl) {
+        const rect = targetEl.getBoundingClientRect();
+        endX = rect.left + rect.width / 2;
+        endY = rect.top + rect.height / 2;
+      }
+
+      const projId = `${Date.now()}-${Math.random()}`;
+      const projectileObj = { id: projId, itemType, startX, startY, endX, endY };
+
+      // 1) 0.7초간 화면에서 과일이 붕 날아가는 모션 활성화
+      setFlyingProjectiles((prev) => [...prev, projectileObj]);
+
+      // 2) 0.7초 후 충돌 지점에서 팡 터지며 "🎯 던진 사람: 🦊 닉네임" 표식 팝업 & 지속 오염 자국 추가
+      setTimeout(() => {
+        setFlyingProjectiles((prev) => prev.filter((p) => p.id !== projId));
+
+        setHitBadgeMap((prev) => ({ ...prev, [targetId]: { senderIcon, senderName } }));
+        setTimeout(() => {
+          setHitBadgeMap((prev) => ({ ...prev, [targetId]: null }));
+        }, 1400);
+
+        setPlayerStainsMap((prev) => {
+          const currentList = prev[targetId] || [];
+          const qIndex = currentList.length % 4; // 4 사분면 (Top-Left, Top-Right, Bottom-Left, Bottom-Right) 순환 배치
+
+          let baseX = 15;
+          let baseY = 15;
+          if (qIndex === 1) { baseX = 55; baseY = 15; }
+          else if (qIndex === 2) { baseX = 15; baseY = 55; }
+          else if (qIndex === 3) { baseX = 55; baseY = 55; }
+
+          const randomX = baseX + Math.floor(Math.random() * 16) - 8;
+          const randomY = baseY + Math.floor(Math.random() * 16) - 8;
+          const randomRotate = Math.floor(Math.random() * 60) - 30;
+
+          const stainItem = {
+            type: itemType,
+            id: `${Date.now()}-${Math.random()}`,
+            x: Math.max(5, Math.min(70, randomX)),
+            y: Math.max(5, Math.min(70, randomY)),
+            rotate: randomRotate,
+          };
+
+          return {
+            ...prev,
+            [targetId]: [...currentList, stainItem],
+          };
+        });
+      }, 700);
+    });
+
+    // 4-2) 💡 서버에서 브로드캐스트되는 힌트 기록을 실시간 수신하여 playerHints state에 즉시 동기화!
+    // ⚠️ 이 리스너가 없으면 힌트 팝업에 힌트가 절대 표시되지 않음 — 핵심 리스너!
+    socket.on("player-hints-updated", ({ playerHints: updatedHints }) => {
+      setPlayerHints(updatedHints || {});
     });
 
     // 5) 게임 시작 수신 (비밀 제시어 및 라이어 수신)
@@ -336,6 +483,11 @@ export default function App() {
       setHintTime(String(room.hintTime || 20)); // 방장이 설정한 힌트 시간 100% 반영
       setTurnSpeakerSocketId(activeSpeakerSocketId || room.players[0]?.socketId || "");
       setEliminatedSocketIds([]);
+
+      // 매 새 게임 시작 시 과일 아이템 재고(인당 각 2개) 및 포트레이트 지속 오염 자국 청소!
+      setMyInventory({ tomato: 2, egg: 2, water: 2, banana: 2 });
+      setPlayerStainsMap({});
+      setHitBadgeMap({});
 
       // 이전 게임이나 라운드의 투표 결과 state들을 깨끗이 초기화
       setFinalDecisionResult(null);
@@ -680,6 +832,7 @@ export default function App() {
       socket.off("room-password-required");
       socket.off("room-updated");
       socket.off("chat-received");
+      socket.off("item-thrown");
       socket.off("game-started");
       socket.off("turn-changed");
       socket.off("game-phase-changed");
@@ -710,6 +863,9 @@ export default function App() {
 
   // [캐릭터 생성 후 대기실 이동 / 생성 / 참여 소켓 제출 함수]
   const handleProceedToRoom = () => {
+    const currentNickname = nickname.trim() || defaultNickname;
+    const myIcon = portraits[selectedPortrait] || "🦊";
+
     if (targetRoomCode || joinInputCode) {
       // 초대 링크 또는 방 코드로 입장하는 사용자
       socket.emit("join-room", {
@@ -728,6 +884,7 @@ export default function App() {
         liarCount,
         hintTime,
         discussionTime,
+        defenseTime,
         nickname: currentNickname,
         portrait: myIcon,
       });
@@ -737,6 +894,9 @@ export default function App() {
   // [방 참여 소켓 전송 함수]
   const handleJoinRoom = () => {
     if (!joinInputCode.trim()) return;
+    const currentNickname = nickname.trim() || defaultNickname;
+    const myIcon = portraits[selectedPortrait] || "🦊";
+
     socket.emit("join-room", {
       roomCode: joinInputCode,
       roomPassword: passInput,
@@ -747,6 +907,9 @@ export default function App() {
 
   // [비밀번호 제출 처리 함수]
   const handlePassSubmit = () => {
+    const currentNickname = nickname.trim() || defaultNickname;
+    const myIcon = portraits[selectedPortrait] || "🦊";
+
     socket.emit("join-room", {
       roomCode: pendingRoomCode || joinInputCode,
       roomPassword: passInput,
@@ -765,11 +928,12 @@ export default function App() {
     socket.emit("start-game");
   };
 
+
   // [채팅 전송 소켓 함수]
   const sendChat = () => {
     const text = chatMessage.trim();
     if (!text) return;
-    socket.emit("send-chat", { text });
+    socket.emit("send-chat", { text, roomCode });
     setChatMessage("");
   };
 
@@ -816,7 +980,7 @@ export default function App() {
           <h1>누가 진짜<br /><strong>거짓말장인</strong>일까?</h1>
           <p className="hero-description">모두가 같은 단어를 아는 척해요.<br />단 한 명, <b>라이어</b>만 빼고요.</p>
           <div className="home-actions" style={{ flexDirection: "column", gap: "10px", alignItems: "flex-start" }}>
-            <button className="primary-button" onClick={() => setScreen("character")}>방 만들기 <span>→</span></button>
+            <button className="primary-button" onClick={() => { setTargetRoomCode(""); setJoinInputCode(""); setScreen("character"); }}>방 만들기 <span>→</span></button>
             <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
               <input
                 style={{ padding: "10px 14px", borderRadius: "10px", border: "2px solid #20212b", fontWeight: "bold", textTransform: "uppercase" }}
@@ -902,7 +1066,7 @@ export default function App() {
 
       {/* 3. 대기실 화면 */}
       {screen === "room" && <section className="room-screen">
-        <div className="screen-intro"><p className="eyebrow">WAITING ROOM</p><h2>친구들을 <mark>불러모으는 중!</mark></h2><p>방 코드나 링크를 공유하면 바로 입장할 수 있어요.</p></div>
+        <div className="screen-intro"><p className="eyebrow">WAITING ROOM</p><h2>친구들을 <mark>불러모으는 중!</mark></h2></div>
         <div className="room-layout">
           <article className="room-card invite-card">
             <div className="settings-heading">
@@ -973,6 +1137,21 @@ export default function App() {
                       <option value="60">60초</option>
                     </select>
                   </label>
+                  <label>최후변론시간
+                    <select
+                      value={defenseTime}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setDefenseTime(val);
+                        handleUpdateRoomSettings({ defenseTime: val });
+                      }}
+                    >
+                      <option value="15">15초</option>
+                      <option value="30">30초</option>
+                      <option value="45">45초</option>
+                      <option value="60">60초</option>
+                    </select>
+                  </label>
                   <label>라이어 수
                     <select
                       value={liarCount}
@@ -1016,7 +1195,7 @@ export default function App() {
                 <p><b>방 제목:</b> {roomTitle}</p>
                 <p><b>최대 인원:</b> {maxPlayers}명</p>
                 <p><b>라이어 수:</b> {liarCount}명</p>
-                <p><b>힌트 / 토론 시간:</b> {hintTime}초 / {discussionTime}초</p>
+                <p><b>힌트 / 토론 / 변론시간:</b> {hintTime}초 / {discussionTime}초 / {defenseTime}초</p>
               </div>
             )}
 
@@ -1027,7 +1206,7 @@ export default function App() {
           <article className="room-card players-card">
             <div className="card-title"><span><i className="online-dot" /> 실시간 접속자 <b>{onlinePlayers.length}</b> / {maxPlayers}</span><small>방 코드: {roomCode} · {roomTitle}</small></div>
             
-            {/* 대기실 실시간 접속 플레이어 칩 (포트레이트 클릭 시 힌트 히스토리 팝업 모달) */}
+            {/* 대기실 실시간 접속 플레이어 칩 (포트레이트 클릭 시 전적 및 업적 팝업 모달 노출) */}
             <div className="players-grid">
               {onlinePlayers.map((player) => (
                 <PlayerChip
@@ -1035,8 +1214,9 @@ export default function App() {
                   key={player.socketId || player.name}
                   displayName={player.name}
                   displayIcon={player.icon}
-                  speech={showBubble && player.socketId === activeSpeakerSocketId ? (chatLog.at(-1)?.text?.split(':')[1] || chatLog.at(-1)?.text) : undefined}
-                  onClick={() => setSelectedHintPlayer(player)}
+                  speech={player.socketId ? userSpeechMap[player.socketId] : undefined}
+                  isActiveSpeaker={player.socketId === activeSpeakerSocketId}
+                  onClick={() => setSelectedProfilePlayer(player)}
                 />
               ))}
               {Array.from({ length: Math.max(0, maxPlayers - onlinePlayers.length) }, (_, index) => (
@@ -1046,7 +1226,7 @@ export default function App() {
             
             <div className="room-chat">
               <div className="room-chat-head"><span>💬 실시간 대기실 채팅</span><small>모든 참여자가 볼 수 있어요</small></div>
-              <div className="room-chat-log" aria-live="polite">
+              <div className="room-chat-log" ref={roomChatLogRef} aria-live="polite">
                 {chatLog.length === 0 ? <p>아직 대화가 없어요. 먼저 인사해 보세요!</p> : chatLog.map((entry, index) => <div className="room-log-entry" key={`${entry.text}-${index}`}><b>{entry.text.split(':')[0]}</b><span>{entry.text.split(':')[1] || entry.text}</span><time>{entry.time}</time></div>)}
               </div>
               <div className="chat-compose">
@@ -1104,6 +1284,93 @@ export default function App() {
             </div>
           </article>
         </div>
+
+        {/* 📌 대기실 포트레이트 클릭 시 플레이어 전적 & 대표 업적 팝업 모달 */}
+        {selectedProfilePlayer && (
+          <div className="modal-backdrop" style={{ backdropFilter: "blur(8px)", backgroundColor: "rgba(0,0,0,0.6)", zIndex: 9999 }}>
+            <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", border: "3px solid #635bff", boxShadow: "0 0 35px rgba(99,91,255,0.5)", animation: "popIn 0.3s ease" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span className="card-label" style={{ color: "#635bff" }}>PLAYER RECORD & ACHIEVEMENTS</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProfilePlayer(null)}
+                  style={{ border: 0, background: "none", fontSize: "20px", cursor: "pointer", fontWeight: "bold", color: "#888" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ textAlign: "center", margin: "10px 0 15px" }}>
+                {/* 포트레이트 이모지 큰 아바타 */}
+                <div style={{ fontSize: "56px", display: "inline-block", padding: "12px", borderRadius: "50%", background: selectedProfilePlayer.softColor || "#f1edff", border: "2px solid #635bff" }}>
+                  {selectedProfilePlayer.icon}
+                </div>
+                <h2 style={{ fontSize: "24px", margin: "10px 0 4px", color: "#2b2b2b" }}>
+                  {selectedProfilePlayer.name}
+                  {selectedProfilePlayer.isHost && <span style={{ fontSize: "12px", marginLeft: "8px", verticalAlign: "middle", background: "#ece5ff", color: "#7652dd", padding: "2px 8px", borderRadius: "6px" }}>👑 방장</span>}
+                </h2>
+
+                {/* 플레이어 전적 및 대표 업적 칭호 */}
+                {(() => {
+                  const stats = getPlayerRecord(selectedProfilePlayer);
+                  return (
+                    <>
+                      {/* 대표 칭호 태그 */}
+                      <div style={{ display: "inline-block", padding: "5px 14px", borderRadius: "99px", background: "#635bff", color: "#ffffff", fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>
+                        {stats.title}
+                      </div>
+
+                      {/* 통계 승률 요약 바 */}
+                      <div style={{ display: "flex", gap: "10px", margin: "18px 0 14px", background: "#f8f6f0", padding: "12px 16px", borderRadius: "14px", border: "1px solid #e8e2d6" }}>
+                        <div style={{ flex: 1, textAlign: "center" }}>
+                          <small style={{ color: "#777", fontSize: "11px", display: "block" }}>총 판수</small>
+                          <strong style={{ fontSize: "18px", color: "#333" }}>{stats.totalGames}전</strong>
+                        </div>
+                        <div style={{ width: "1px", background: "#ddd" }} />
+                        <div style={{ flex: 1, textAlign: "center" }}>
+                          <small style={{ color: "#777", fontSize: "11px", display: "block" }}>전체 승률</small>
+                          <strong style={{ fontSize: "18px", color: "#ff4785" }}>{stats.winRate}%</strong>
+                        </div>
+                      </div>
+
+                      {/* 4가지 전적 세부 2x2 그리드 카드 (시민 승리/마피아 승리/시민 패배/마피아 패배) */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div style={{ padding: "12px 10px", borderRadius: "14px", background: "#cbf7e6", border: "1.5px solid #a3f0d1", textAlign: "center" }}>
+                          <span style={{ fontSize: "12px", color: "#059669", fontWeight: "bold", display: "block" }}>🛡️ 시민으로서 승리</span>
+                          <b style={{ fontSize: "18px", color: "#047857" }}>{stats.citizenWin}승</b>
+                        </div>
+
+                        <div style={{ padding: "12px 10px", borderRadius: "14px", background: "#ffe5ee", border: "1.5px solid #ffb3cc", textAlign: "center" }}>
+                          <span style={{ fontSize: "12px", color: "#e11d48", fontWeight: "bold", display: "block" }}>🦊 마피아(라이어) 승리</span>
+                          <b style={{ fontSize: "18px", color: "#be123c" }}>{stats.liarWin}승</b>
+                        </div>
+
+                        <div style={{ padding: "12px 10px", borderRadius: "14px", background: "#f3f4f6", border: "1.5px solid #e5e7eb", textAlign: "center" }}>
+                          <span style={{ fontSize: "12px", color: "#6b7280", fontWeight: "bold", display: "block" }}>💀 시민으로서 패배</span>
+                          <b style={{ fontSize: "18px", color: "#4b5563" }}>{stats.citizenLoss}패</b>
+                        </div>
+
+                        <div style={{ padding: "12px 10px", borderRadius: "14px", background: "#fef3c7", border: "1.5px solid #fde68a", textAlign: "center" }}>
+                          <span style={{ fontSize: "12px", color: "#d97706", fontWeight: "bold", display: "block" }}>🎭 마피아(라이어) 패배</span>
+                          <b style={{ fontSize: "18px", color: "#b45309" }}>{stats.liarLoss}패</b>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <button
+                type="button"
+                className="primary-button"
+                style={{ width: "100%", marginTop: "10px" }}
+                onClick={() => setSelectedProfilePlayer(null)}
+              >
+                닫기 ➔
+              </button>
+            </div>
+          </div>
+        )}
       </section>}
 
       {/* 4. 게임 진행 화면 (Play Screen) */}
@@ -1115,12 +1382,26 @@ export default function App() {
               <div style={{ textAlign: "center", color: "#fff", animation: "popIn 0.3s ease" }}>
                 <span className="eyebrow" style={{ color: "#ffb703", fontSize: "18px" }}>GAME STARTING</span>
                 <h1 style={{ fontSize: "96px", margin: "10px 0", textShadow: "0 0 20px rgba(255,183,3,0.8)" }}>{countdownNum}</h1>
-                <p style={{ fontSize: "20px" }}>곧 게임이 시작됩니다! 포지션을 확인하세요.</p>
+                <div style={{
+                  background: "#fff2f6", border: "2.5px solid #ff4785", borderRadius: "16px", padding: "14px 24px", margin: "15px auto",
+                  maxWidth: "420px", color: "#2b2b2b", boxShadow: "0 8px 25px rgba(255,71,133,0.4)"
+                }}>
+                  <div style={{ fontSize: "13px", fontWeight: "bold", color: "#ff4785", marginBottom: "4px" }}>📌 이번 판 제시어 카테고리 (주제)</div>
+                  <div style={{ fontSize: "24px", fontWeight: "900", color: "#635bff" }}>[{secretCategory}]</div>
+                </div>
+                <p style={{ fontSize: "18px", color: "#eee" }}>곧 게임이 시작됩니다! 나의 소식과 역할을 정독하세요.</p>
               </div>
             ) : (
               <div className="nickname-modal" style={{ maxWidth: "480px", width: "90%", textAlign: "center", border: "3px solid #ffb703", boxShadow: "0 0 30px rgba(255,183,3,0.4)" }}>
                 <span className="card-label" style={{ color: "#ffb703" }}>GAME NOTICE</span>
-                <h2 style={{ fontSize: "20px", margin: "10px 0 15px 0", whiteSpace: "pre-line", minHeight: "60px", lineHeight: "1.5", color: "#2b2b2b" }}>
+                <div style={{
+                  background: "#fff9e6", border: "2px dashed #ffb703", borderRadius: "14px", padding: "12px", margin: "10px 0 16px 0",
+                  textAlign: "center"
+                }}>
+                  <div style={{ fontSize: "12px", fontWeight: "bold", color: "#d97706", marginBottom: "3px" }}>📌 이번 판 제시어 카테고리 (주제)</div>
+                  <div style={{ fontSize: "22px", fontWeight: "900", color: "#635bff" }}>[{secretCategory}]</div>
+                </div>
+                <h2 style={{ fontSize: "18px", margin: "10px 0 15px 0", whiteSpace: "pre-line", minHeight: "60px", lineHeight: "1.5", color: "#2b2b2b" }}>
                   {typedText}
                 </h2>
                 <div style={{ fontSize: "13px", color: "#666", marginTop: "10px" }}>
@@ -1528,15 +1809,23 @@ export default function App() {
             {/* 상단 플레이어 줄 */}
             <div className="astra-portrait-row" style={{ filter: isNoticeDimmed ? "grayscale(70%) opacity(0.4)" : "none", transition: "all 0.3s" }}>
               {onlinePlayers.slice(0, 6).map((player) => {
-                const isSpeaker = showBubble && player.socketId === activeSpeakerSocketId;
+                const isSpeaker = userSpeechMap[player.socketId];
                 const isTurnSpeaker = gamePhase === "hint-turn" && player.socketId === turnSpeakerSocketId;
                 const isEliminated = eliminatedSocketIds.includes(player.socketId);
-                const latestChat = chatLog.at(-1)?.text;
+                const stains = playerStainsMap[player.socketId] || [];
+                const hitBadge = hitBadgeMap[player.socketId];
 
                 return (
                   <div
                     className="astra-player-card"
                     key={`top-${player.socketId || player.name}`}
+                    data-socket-id={player.socketId}
+                    data-player-name={player.name}
+                    onClick={() => {
+                      if (player.socketId !== (socket.id || myPlayerInfo?.socketId)) {
+                        setItemTargetPlayer(player);
+                      }
+                    }}
                     style={{
                       backgroundColor: isEliminated ? "#dcdcdc" : player.softColor,
                       borderColor: isTurnSpeaker ? "#ff4785" : player.color,
@@ -1544,6 +1833,46 @@ export default function App() {
                       filter: isEliminated ? "grayscale(100%) opacity(0.5)" : "none",
                     }}
                   >
+                    {/* 마우스 호버 시 노출되는 [💡 Hint] 뱃지 */}
+                    <button
+                      type="button"
+                      className="hint-badge-button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedHintPlayer(player);
+                      }}
+                    >
+                      💡 Hint
+                    </button>
+
+                    {/* 충돌 시 머리 위에 떠오르는 [🎯 던진 사람: 🦊 닉네임] 표식 */}
+                    {hitBadge && (
+                      <div className="throw-hit-sender-badge">
+                        🎯 던진 사람: {hitBadge.senderIcon} {hitBadge.senderName}
+                      </div>
+                    )}
+
+                    {/* 캐릭터 지속 오염 자국 Stain Overlay */}
+                    <div className="stain-overlay-container">
+                      {stains.map((stain) => (
+                        <span
+                          key={stain.id}
+                          className="stain-item"
+                          style={{
+                            left: `${stain.x}%`,
+                            top: `${stain.y}%`,
+                            transform: `rotate(${stain.rotate}deg)`,
+                          }}
+                        >
+                          <img
+                            src={`/items/broken_${stain.type.toLowerCase()}.png`}
+                            alt={stain.type}
+                            style={{ width: "54px", height: "54px", objectFit: "contain", filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.3))" }}
+                          />
+                        </span>
+                      ))}
+                    </div>
+
                     <div className="astra-avatar-wrap">
                       <Avatar type="initial" initials={player.icon} size="large" shape="square" />
                     </div>
@@ -1551,8 +1880,8 @@ export default function App() {
                       {player.name} {isEliminated && "(탈락)"}
                     </span>
                     {/* 발언자 본인 캐릭터 카드 위에만 말풍선 표시 */}
-                    {isSpeaker && latestChat && (
-                      <div className="astra-speech-bubble">{latestChat.split(':')[1] || latestChat}</div>
+                    {isSpeaker && (
+                      <div className="astra-speech-bubble">{isSpeaker}</div>
                     )}
                   </div>
                 );
@@ -1585,7 +1914,7 @@ export default function App() {
                       }}
                     >
                       <span className="text-label-xs text-text-secondary">
-                        나의 비밀 제시어 [{secretCategory}]
+                        마우스를 올려 제시어 확인
                       </span>
                       <span className="astra-secret-word text-label-sm" style={isLiar ? { background: "#ff4785" } : undefined}>
                         {secretWord}
@@ -1725,15 +2054,23 @@ export default function App() {
             {/* 하단 플레이어 줄 */}
             <div className="astra-portrait-row" style={{ filter: isNoticeDimmed ? "grayscale(70%) opacity(0.4)" : "none", transition: "all 0.3s" }}>
               {onlinePlayers.slice(6, 12).map((player) => {
-                const isSpeaker = showBubble && player.socketId === activeSpeakerSocketId;
+                const isSpeaker = userSpeechMap[player.socketId];
                 const isTurnSpeaker = gamePhase === "hint-turn" && player.socketId === turnSpeakerSocketId;
                 const isEliminated = eliminatedSocketIds.includes(player.socketId);
-                const latestChat = chatLog.at(-1)?.text;
+                const stains = playerStainsMap[player.socketId] || [];
+                const hitBadge = hitBadgeMap[player.socketId];
 
                 return (
                   <div
                     className="astra-player-card"
                     key={`bottom-${player.socketId || player.name}`}
+                    data-socket-id={player.socketId}
+                    data-player-name={player.name}
+                    onClick={() => {
+                      if (player.socketId !== (socket.id || myPlayerInfo?.socketId)) {
+                        setItemTargetPlayer(player);
+                      }
+                    }}
                     style={{
                       backgroundColor: isEliminated ? "#dcdcdc" : player.softColor,
                       borderColor: isTurnSpeaker ? "#ff4785" : player.color,
@@ -1741,14 +2078,54 @@ export default function App() {
                       filter: isEliminated ? "grayscale(100%) opacity(0.5)" : "none",
                     }}
                   >
+                    {/* 마우스 호버 시 노출되는 [💡 Hint] 뱃지 */}
+                    <button
+                      type="button"
+                      className="hint-badge-button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedHintPlayer(player);
+                      }}
+                    >
+                      💡 Hint
+                    </button>
+
+                    {/* 충돌 시 머리 위에 떠오르는 [🎯 던진 사람: 🦊 닉네임] 표식 */}
+                    {hitBadge && (
+                      <div className="throw-hit-sender-badge">
+                        🎯 던진 사람: {hitBadge.senderIcon} {hitBadge.senderName}
+                      </div>
+                    )}
+
+                    {/* 캐릭터 지속 오염 자국 Stain Overlay */}
+                    <div className="stain-overlay-container">
+                      {stains.map((stain) => (
+                        <span
+                          key={stain.id}
+                          className="stain-item"
+                          style={{
+                            left: `${stain.x}%`,
+                            top: `${stain.y}%`,
+                            transform: `rotate(${stain.rotate}deg)`,
+                          }}
+                        >
+                          <img
+                            src={`/items/broken_${stain.type.toLowerCase()}.png`}
+                            alt={stain.type}
+                            style={{ width: "54px", height: "54px", objectFit: "contain", filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.3))" }}
+                          />
+                        </span>
+                      ))}
+                    </div>
+
                     <div className="astra-avatar-wrap">
                       <Avatar type="initial" initials={player.icon} size="large" shape="square" />
                     </div>
                     <span className="text-label-sm text-text-primary">
                       {player.name} {isEliminated && "(탈락)"}
                     </span>
-                    {isSpeaker && latestChat && (
-                      <div className="astra-speech-bubble">{latestChat.split(':')[1] || latestChat}</div>
+                    {isSpeaker && (
+                      <div className="astra-speech-bubble">{isSpeaker}</div>
                     )}
                   </div>
                 );
@@ -1756,7 +2133,171 @@ export default function App() {
             </div>
           </main>
         </div>
+
+        {/* ── 🎯 인터랙티브 과일 투척 메뉴 휠 모달 ── */}
+        {itemTargetPlayer && (
+          <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setItemTargetPlayer(null)}>
+            <div className="nickname-modal" style={{ maxWidth: "380px", width: "90%", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+              <span className="card-label" style={{ color: "#ff4785" }}>ITEM THROW</span>
+              <div style={{ fontSize: "44px", margin: "8px 0" }}>{itemTargetPlayer.icon}</div>
+              <h2 style={{ fontSize: "20px", margin: "4px 0 10px 0", color: "#2b2b2b" }}>
+                🎯 <span style={{ color: "#ff4785" }}>[{itemTargetPlayer.name}]</span> 님에게 투척!
+              </h2>
+              <p style={{ fontSize: "12px", color: "#666", marginBottom: "16px" }}>
+                원하는 아이템을 선택해 날려보세요 (매 판당 각 2개 제공)
+              </p>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                {[
+                  { type: "tomato", name: "토마토", icon: "🍅", color: "#ff4785", bg: "#ffe5ee" },
+                  { type: "egg", name: "달걀", icon: "🥚", color: "#d97706", bg: "#fef3c7" },
+                  { type: "water", name: "물풍선", icon: "💦", color: "#0284c7", bg: "#e0f2fe" },
+                  { type: "banana", name: "바나나 껍질", icon: "🍌", color: "#ca8a04", bg: "#fef9c3" },
+                ].map((item) => {
+                  const count = myInventory[item.type] ?? 2;
+                  const isDisabled = count <= 0;
+                  return (
+                    <button
+                      key={item.type}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => {
+                        const targetId = itemTargetPlayer.socketId || itemTargetPlayer.name;
+                        socket.emit("throw-item", { targetId, itemType: item.type, roomCode });
+                        setItemTargetPlayer(null);
+                      }}
+                      style={{
+                        padding: "12px",
+                        borderRadius: "14px",
+                        border: `2px solid ${isDisabled ? "#ccc" : item.color}`,
+                        background: isDisabled ? "#f3f4f6" : item.bg,
+                        cursor: isDisabled ? "not-allowed" : "pointer",
+                        opacity: isDisabled ? 0.5 : 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "4px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <img src={`/items/${item.type.toLowerCase()}.png`} alt={item.name} style={{ width: "38px", height: "38px", objectFit: "contain" }} />
+                      <b style={{ fontSize: "13px", color: isDisabled ? "#888" : item.color }}>{item.name}</b>
+                      <small style={{ fontSize: "10px", color: isDisabled ? "#aaa" : "#555", fontWeight: "bold" }}>
+                        {count > 0 ? `남은수량: ${count}/2개` : "소진됨 (0/2)"}
+                      </small>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                className="primary-button"
+                style={{ width: "100%", marginTop: "16px", background: "#666", borderColor: "#555" }}
+                onClick={() => setItemTargetPlayer(null)}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        )}
       </section>}
+
+      {/* 🚀 [화면 전체 날아가는 과일 투척 3D 궤적 애니메이션 오버레이] */}
+      {flyingProjectiles.length > 0 && (
+        <div className="flying-projectile-layer">
+          {flyingProjectiles.map((p) => {
+            return (
+              <div
+                key={p.id}
+                className="flying-projectile-item"
+                style={{
+                  "--sx": `${p.startX}px`,
+                  "--sy": `${p.startY}px`,
+                  "--ex": `${p.endX}px`,
+                  "--ey": `${p.endY}px`,
+                } as React.CSSProperties}
+              >
+                <img
+                  src={`/items/${p.itemType.toLowerCase()}.png`}
+                  alt={p.itemType}
+                  style={{ width: "52px", height: "52px", objectFit: "contain", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.35))" }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 💡 [포트레이트 힌트 작성 히스토리 모달] */}
+      {selectedHintPlayer && (
+        <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setSelectedHintPlayer(null)}>
+          <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <span className="card-label" style={{ color: "#ffb703" }}>HINT HISTORY</span>
+            <div style={{ fontSize: "48px", margin: "8px 0" }}>{selectedHintPlayer.icon}</div>
+            <h2 style={{ fontSize: "20px", margin: "4px 0 14px 0", color: "#2b2b2b" }}>
+              💡 <span style={{ color: "#635bff" }}>[{selectedHintPlayer.name}]</span> 님의 힌트 히스토리
+            </h2>
+            <p style={{ fontSize: "12px", color: "#666", marginBottom: "16px" }}>
+              이 유저가 이번 매치에서 발표한 라운드별 힌트 기록입니다.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "240px", overflowY: "auto", textAlign: "left" }}>
+              {(() => {
+                // 1) 백엔드 저장소 playerHints 객체에서 힌트 배열 추출
+                const savedHints =
+                  playerHints[selectedHintPlayer.socketId] ||
+                  playerHints[selectedHintPlayer.name] ||
+                  [];
+
+                // 2) chatLog 대화 기록에서 해당 유저의 모든 발언 메시지 추출
+                const chatMatchedHints = chatLog
+                  .filter((log) => {
+                    const parts = log.text.split(":");
+                    const senderName = parts[0]?.trim();
+                    return senderName === selectedHintPlayer.name;
+                  })
+                  .map((log, idx) => {
+                    const parts = log.text.split(":");
+                    const content = parts.slice(1).join(":").trim() || log.text;
+                    return { round: idx + 1, text: content, time: log.time };
+                  });
+
+                // 3) 두 기록 중 유효한 힌트 배열 자동 병합
+                const combined = savedHints.length > 0 ? savedHints : chatMatchedHints;
+
+                if (combined.length === 0) {
+                  return (
+                    <div style={{ padding: "20px", textAlign: "center", color: "#888", background: "#f8f6f0", borderRadius: "12px", fontSize: "13px" }}>
+                      아직 제출한 힌트가 없습니다. 💬
+                    </div>
+                  );
+                }
+                return combined.map((h: any, idx: number) => (
+                  <div key={idx} style={{ padding: "12px 14px", background: "#f3f0ff", border: "1.5px solid #d8ceff", borderRadius: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "bold", color: "#635bff", marginBottom: "4px" }}>
+                      <span>💬 힌트 발언 #{idx + 1}</span>
+                      <span style={{ color: "#aaa" }}>{h.time}</span>
+                    </div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#20212b", wordBreak: "break-word" }}>
+                      "{h.text}"
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <button
+              type="button"
+              className="primary-button"
+              style={{ width: "100%", marginTop: "16px" }}
+              onClick={() => setSelectedHintPlayer(null)}
+            >
+              닫기 ➔
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 닉네임 수정 모달 팝업 */}
       {editingNickname && (

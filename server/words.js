@@ -98,3 +98,33 @@ export function getRandomWord(targetCategory) {
     word: word,
   };
 }
+
+/**
+ * 바보 라이어 모드용: 같은 카테고리 내에서 무작위로 2개의 서로 다른 단어를 뽑아주는 헬퍼 함수
+ */
+export function getTwoRandomWords(targetCategory) {
+  let categoryObj;
+  if (targetCategory && targetCategory !== "ALL") {
+    categoryObj = wordCategories.find((c) => c.category === targetCategory);
+  }
+  if (!categoryObj) {
+    categoryObj = wordCategories[Math.floor(Math.random() * wordCategories.length)];
+  }
+
+  const words = [...categoryObj.words];
+  if (words.length < 2) {
+    return { category: categoryObj.category, word1: words[0] || "제시어", word2: "다른 제시어" };
+  }
+
+  const idx1 = Math.floor(Math.random() * words.length);
+  const word1 = words[idx1];
+  words.splice(idx1, 1);
+  const idx2 = Math.floor(Math.random() * words.length);
+  const word2 = words[idx2];
+
+  return {
+    category: categoryObj.category,
+    word1: word1,
+    word2: word2,
+  };
+}

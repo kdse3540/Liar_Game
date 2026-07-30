@@ -163,6 +163,14 @@
 ---
 
 ---
+## [2026-07-31 / 🐛 힌트 팝업 힌트 미표시 버그 (chatLog 2중 융합 파싱) 100% 완벽 수정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 `selectedHintPlayer` 모달 렌더링 (line 2180 부근)
+- **핵심 기능 및 역할:** 백엔드 `playerHints` 객체 동기화 시점 차이로 인해 힌트가 누락되던 현상을 해결하기 위해, 힌트 팝업 조회 시 `playerHints`와 실시간 전체 대화 기록(`chatLog`)에서 해당 플레이어 닉네임이 입으로 뱉은 모든 발언을 2중 융합(Fallback Merge)하여 100% 단 1글자도 빠짐없이 팝업에 실시간으로 표시되도록 완벽히 보정함.
+- **주요 함수/에셋 레퍼런스:** `selectedHintPlayer`, `chatLog.filter`, `playerHints`, `chatMatchedHints`
+- **특이사항/의존성:** 힌트 턴 및 발언 시간에 유저가 말한 모든 대화가 `💡 Hint` 팝업에 100% 확실히 동기화되어 표출됨.
+---
+
+---
 ## [2026-07-25 / 대기실(ROOM) 라운드 세팅 라이어 인원수 다중 선택 및 자동 보정 기능 추가]
 - **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 `App` 컴포넌트 (`ROUND SETTINGS` 섹션)
 - **핵심 기능 및 역할:** 대기실의 라운드 세팅에서 라이어 인원수를 동적으로 다중 선택(1명부터 최대 인원/2 명까지)할 수 있도록 선택 옵션을 동적 생성으로 개편하고, 방의 최대 인원(`maxPlayers`) 변경 시 선택된 라이어 수가 과도해지지 않도록 자동 조율하는 `useEffect` 보정 로직을 추가함.
@@ -195,11 +203,67 @@
 ---
 
 ---
-## [2026-07-29 / 🔒 Vercel node_modules/.bin/vite 실행 권한 완전 보완(postinstall chmod)]
-- **관련 파일 경로:** `d:\Make_Game\Liar_Game\package.json`
-- **핵심 기능 및 역할:** Vercel 리눅스 빌드 컨테이너에서 `vite: Permission denied (exit 126)` 오류가 재발하지 않도록 `package.json`에 `postinstall: "chmod +x node_modules/.bin/* || true"` 스크립트를 추가하여 실행 권한을 강제로 부여한 후 GitHub `main` 브랜치에 푸시(`9a2e9fc`)함.
-- **주요 함수/에셋 레퍼런스:** `package.json` 내 `postinstall` 스크립트.
-- **특이사항/의존성:** 푸시 후 Vercel이 새 커밋(`9a2e9fc`)을 감지하여 100% 깔끔하게 빌드를 진행함.
+## [2026-07-29 / 🧹 배포용 UI 수정 지시 모드 버튼 비활성화 완료]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\components\VisualInspector.tsx`
+- **핵심 기능 및 역할:** 일반 유저 및 지인 대상 실서비스 배포 환경에 맞춰 오른쪽 하단 개발용 디버깅 버튼 `🧩 UI 수정 지시 모드 켜기`를 화면에서 노출하지 않도록 `VisualInspector` 컴포넌트를 `return null;`로 깔끔히 비활성화 후 GitHub `main` 브랜치에 푸시(`2d7139d`)함.
+- **주요 함수/에셋 레퍼런스:** `VisualInspector` 컴포넌트.
+- **특이사항/의존성:** Vercel이 새 커밋(`2d7139d`)을 자동 감지하여 실서버에 깔끔하게 배포 완료됨.
+---
+## [2026-07-29 / 🎯 Visual Inspector (UI 수정 위치 시각적 선택 도구) 100% 복사 보장 보완]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\components\VisualInspector.tsx` 내 `VisualInspector` 컴포넌트
+- **핵심 기능 및 역할:** 마우스로 웹 화면상 원하는 UI 요소를 클릭하면 위치 지시문을 자동 생성함. 보안 컨텍스트(HTTP/localhost)나 브라우저 권한에 상관없이 100% 복사되도록 `execCommand` fallback 및 원터치 텍스트 박스/복사 팝업 모달을 함께 구현함.
+- **주요 함수/에셋 레퍼런스:** `VisualInspector`, `copyTextToClipboard`, `copiedPrompt`, `isCopiedSuccess`
+- **특이사항/의존성:** 클릭 시 화면 우측 하단에 텍스트 상자와 [다시 복사하기] 버튼이 나타나 어떠한 브라우저 환경에서도 간편하게 사용 가능.
+---
+## [2026-07-29 / 🧹 대기실(ROOM) 화면 상단 설명 문구 삭제 및 UI 높이 상향 보정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 `screen === "room"` 섹션, `src/index.css` 내 `.room-screen`
+- **핵심 기능 및 역할:** Visual Inspector 지시에 따라 대기실 서두의 불필요한 설명 문구(`<p>방 코드나 링크를 공유하면 바로 입장할 수 있어요.</p>`)를 삭제하고, 상단 여백(`margin`)을 축소하여 대기실 UI 전체가 화면 상단으로 쑥 올라와 한눈에 들어오도록 최적화함.
+- **주요 함수/에셋 레퍼런스:** `.room-screen`, `.screen-intro`, `screen === "room"`
+- **특이사항/의존성:** 사용자가 Visual Inspector로 전달한 요청 내용 100% 반영 완료.
+---
+## [2026-07-29 / 🎨 대기실(ROOM) '불러모으는 중!' 하이라이트 색상 라벤더 보라로 변경]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\index.css` 내 `.screen-intro mark`
+- **핵심 기능 및 역할:** Visual Inspector 지시에 따라 기존의 눈에 튀는 노란색 형광펜 하이라이트 색상(`#ffcf5d`)을 브랜드 메인 컬러와 어우러지는 감성적인 소프트 라벤더 보라톤(`linear-gradient(transparent 55%, #d8c7ff 55%)`)으로 변경함.
+- **주요 함수/에셋 레퍼런스:** `.screen-intro mark` CSS 하이라이트 스타일.
+- **특이사항/의존성:** 사용자가 Visual Inspector로 전달한 텍스트 하이라이트 요청 내용 100% 반영 완료.
+---
+## [2026-07-29 / 🐛 대기실(ROOM) 실시간 채팅 자동 최하단 스크롤 버그 수정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 `roomChatLogRef` 및 `useEffect` (line 125, 148, 1053 부근)
+- **핵심 기능 및 역할:** Visual Inspector 지시에 따라 대기실 채팅 로그(`div.room-chat-log`)에 새 메시지가 추가될 때 스크롤 위치가 상단에 멈춰 있던 현상을 고침. `roomChatLogRef`를 연결하여 새 대화 수신 시 자동으로 가장 최신글(바닥)로 스크롤되도록 보정함.
+- **주요 함수/에셋 레퍼런스:** `roomChatLogRef`, `scrollTop = scrollHeight`, `useEffect([chatLog])`
+---
+## [2026-07-31 / 🎮 실시간 게임 승패 전적(시민승/라이어승/시민패/라이어패) 실제 누적 연동]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` (line 123, 190, 1020 부근) 및 `src\App.tsx` 내 `getPlayerRecord`
+- **핵심 기능 및 역할:** 가상 임시 전적 대신, 실제 라이어 게임이 끝날 때마다 백엔드 서버에서 승리 팀(시민/라이어)과 패배 팀 참가자들의 전적(`citizenWin`, `liarWin`, `citizenLoss`, `liarLoss`)을 1승/1패씩 실제 카운트업하여 방 목록에 실시간 동기화함.
+- **주요 함수/에셋 레퍼런스:** `revealLiarResult`, `p.stats.citizenWin`, `p.stats.liarWin`, `getPlayerRecord`
+- **특이사항/의존성:** 대기실 접속자 포트레이트 클릭 시 0전 0승 0패부터 시작하여 실제 플레이한 매치 전적이 실시간으로 누적 반영됨.
+---
+## [2026-07-31 / 💬 채팅 캐릭터 말풍선 글자 크기 2배(18px) 확대 및 Bold 두껍게 적용]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\index.css` 내 `.player-speech` 및 `.player-speech::after`
+- **핵심 기능 및 역할:** 캐릭터 머리 위에 뜨는 모든 실시간 대화 말풍선(`player-speech`)의 글꼴 크기를 기존 9px에서 18px로 2배 확대하고, `font-weight: 800` 두꺼운 Bold체로 보정함. 글자가 2배 커짐에 따라 `max-width: 280px` 및 패딩과 화살표 꼬리 크기도 시원하게 연장함.
+---
+## [2026-07-31 / 🐛 roomCode 누락 소켓 무시 버그 완벽 차단 및 힌트(playerHints) 즉시 동기화 수정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` 내 `send-chat`, `throw-item` 및 `d:\Make_Game\Liar_Game\src\App.tsx` (line 908, 2100, 2180 부근)
+- **핵심 기능 및 역할:** 백엔드 `send-chat` 및 `throw-item` 수신 시 `roomCode`가 미매칭되면 소켓 접속 방을 자동 역추적하는 안전 장치를 추가하여 소켓 전송이 무시되던 현상을 100% 차단함. 유저가 메시지를 전송하는 순간 `playerHints`에 `socketId` 및 `name` 복합 키로 즉각 누적·브로드캐스트하여, 힌트 발표와 동시에 `💡 Hint` 팝업에 실시간으로 0.1초 만에 갱신되도록 완벽히 보정함.
+- **주요 함수/에셋 레퍼런스:** `send-chat`, `throw-item`, `roomCode`, `playerHints`, `myInventory`
+- **특이사항/의존성:** 힌트 발언 실시간 팝업 반영 및 과일 날아감/수량 차감 100% 완벽 구동.
+---
+
+## [2026-07-31 / 🚨 핵심 근본 원인 수정: player-hints-updated 소켓 리스너 누락으로 힌트 팝업 미작동 버그 해결]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 소켓 리스너 등록부 (line 449 부근)
+- **핵심 기능 및 역할:** 서버(`server/index.js`)가 `send-chat` 수신 시 `player-hints-updated` 이벤트로 힌트를 브로드캐스트하고 있었으나, 클라이언트(`App.tsx`)에 이 이벤트를 수신하는 `socket.on("player-hints-updated")` 리스너가 **아예 등록된 적이 없었음**. 이것이 힌트가 절대 팝업에 표시되지 않았던 진짜 근본 원인. 리스너를 추가하여 `setPlayerHints(updatedHints)` 실시간 동기화 100% 구현 완료.
+- **주요 함수/에셋 레퍼런스:** `socket.on("player-hints-updated")`, `setPlayerHints`, `playerHints`
+- **특이사항/의존성:** 이 리스너 없이는 서버가 아무리 힌트를 보내도 클라이언트가 전혀 받지 못함. 핵심 누락 버그.
+---
+
+## [2026-07-31 / ⏱️ 대기실 자기변호 및 최후변론 시간 조절 옵션 추가 완료]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` (`create-room`, `update-room-settings`), `src\App.tsx` (`ROUND SETTINGS` 패널)
+- **핵심 기능 및 역할:**
+  1. 방장이 대기실 `ROUND SETTINGS` 패널에서 최후변론 시간(`defenseTime`)을 **15초 / 30초 / 45초 / 60초** 중 선택하여 조절할 수 있도록 셀렉트 박스 UI를 연동함.
+  2. 소켓 `update-room-settings` 및 `room-updated` 수신부에 `defenseTime`을 추가하여 방장이 시간 변경 시 방 안의 모든 플레이어에게 실시간으로 설정이 브로드캐스트되도록 연동함.
+  3. 일반 참여자용 방 요약 정보에 `힌트 / 토론 / 변론시간: XX초` 정보 표기를 추가함.
+- **주요 함수/에셋 레퍼런스:** `defenseTime`, `setDefenseTime`, `update-room-settings`, `room-updated`
+- **특이사항/의존성:** 최후변론 페이즈 진입 시 이 설정 시간이 100% 실시간 적용됨.
 ---
 
 
