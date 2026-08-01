@@ -937,14 +937,9 @@ export default function App() {
     setChatMessage("");
   };
 
-  // [초대 URL 링크 복사 함수 - 상대방 접속용 Network IP 자동 적용]
+  // [초대 URL 링크 복사 함수 - 배포 및 로컬 도메인 동적 자동 적용]
   const copyCode = () => {
-    let host = window.location.host;
-    // 내 컴에서 localhost로 들어왔더라도 친구에게 보낼 땐 네트워크 IP로 자동 변환!
-    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-      host = `192.168.75.196:${window.location.port || 5173}`;
-    }
-    const inviteUrl = `${window.location.protocol}//${host}${window.location.pathname}?room=${roomCode}`;
+    const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
     navigator.clipboard?.writeText(inviteUrl);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1400);

@@ -266,6 +266,14 @@
 - **특이사항/의존성:** 최후변론 페이즈 진입 시 이 설정 시간이 100% 실시간 적용됨.
 ---
 
+---
+## [2026-08-01 / 🔗 로컬 IP(192.168.75.196) 하드코딩 제거 및 동적 초대 URL 생성 수정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` 내 `copyCode` 함수 영역
+- **핵심 기능 및 역할:** `copyCode` 함수 내에 하드코딩되어 있던 사설 IP(`192.168.75.196`) 및 local 전용 예외 처리 로직을 제거하고, 현재 접속 중인 브라우저 도메인(`window.location.origin` + `window.location.pathname`) 기반으로 초대 URL을 동적 복사하도록 보정함.
+- **주요 함수/에셋 레퍼런스:** `copyCode`, `inviteUrl`, `window.location.origin`, `roomCode`
+- **특이사항/의존성:** Vercel/Netlify 등 클라우드 배포 환경에서 복사한 초대 링크로 외부 플레이어가 100% 정상 접속 가능함.
+---
+
 
 
 
