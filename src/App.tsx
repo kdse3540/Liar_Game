@@ -849,15 +849,19 @@ export default function App() {
   // --------------------------------------------------------------------
   // [초대 URL 자동 감지] 웹앱 처음 접속 시 최초 1회만 실행되는 useEffect
   // --------------------------------------------------------------------
-  // (이전에는 라운드가 바뀔 때마다 재실행되어 초대 접속자들이 캐릭터 선택 화면으로 튕기는 버그가 있었음)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const roomFromUrl = params.get("room");
+    const roomFromUrl = params.get("room") || params.get("roomCode");
     if (roomFromUrl) {
-      const code = roomFromUrl.toUpperCase();
+      const code = roomFromUrl.toUpperCase().trim();
       setTargetRoomCode(code);
       setJoinInputCode(code);
       setScreen("character"); // 최초 1회 접속 시에만 캐릭터 선택 화면으로 이동
+      
+      // 초대 주소 접속 시 소켓 연결 즉시 수립 보장
+      if (!socket.connected) {
+        socket.connect();
+      }
     }
   }, []); // 의존성 배열 []: 최초 마운트 시 1회만 동작!
 
@@ -866,10 +870,17 @@ export default function App() {
     const currentNickname = nickname.trim() || defaultNickname;
     const myIcon = portraits[selectedPortrait] || "🦊";
 
-    if (targetRoomCode || joinInputCode) {
+    // 소켓 연결 끊김 방지 자동 재연결 처리
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    const roomToJoin = (targetRoomCode || joinInputCode).trim().toUpperCase();
+
+    if (roomToJoin) {
       // 초대 링크 또는 방 코드로 입장하는 사용자
       socket.emit("join-room", {
-        roomCode: targetRoomCode || joinInputCode,
+        roomCode: roomToJoin,
         roomPassword: passInput,
         nickname: currentNickname,
         portrait: myIcon,
@@ -897,8 +908,12 @@ export default function App() {
     const currentNickname = nickname.trim() || defaultNickname;
     const myIcon = portraits[selectedPortrait] || "🦊";
 
+    if (!socket.connected) {
+      socket.connect();
+    }
+
     socket.emit("join-room", {
-      roomCode: joinInputCode,
+      roomCode: joinInputCode.trim().toUpperCase(),
       roomPassword: passInput,
       nickname: currentNickname,
       portrait: myIcon,
@@ -910,8 +925,12 @@ export default function App() {
     const currentNickname = nickname.trim() || defaultNickname;
     const myIcon = portraits[selectedPortrait] || "🦊";
 
+    if (!socket.connected) {
+      socket.connect();
+    }
+
     socket.emit("join-room", {
-      roomCode: pendingRoomCode || joinInputCode,
+      roomCode: (pendingRoomCode || joinInputCode || targetRoomCode).trim().toUpperCase(),
       roomPassword: passInput,
       nickname: currentNickname,
       portrait: myIcon,
@@ -960,11 +979,43 @@ export default function App() {
         <button className="sound-button" aria-label="소리 설정">♪</button>
       </header>
 
-      {/* 에러 메시지 팝업 */}
+      {/* 에러 메시지 팝업 (선명한 상단 플로팅 모달) */}
       {errorMessage && (
-        <div style={{ background: "#ff4785", color: "#fff", padding: "10px 20px", textAlign: "center", fontWeight: "bold", fontSize: "13px" }}>
-          ⚠️ {errorMessage}
-          <button style={{ marginLeft: "15px", background: "none", border: 0, color: "#fff", cursor: "pointer" }} onClick={() => setErrorMessage("")}>✕</button>
+        <div style={{
+          position: "fixed",
+          top: "24px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 99999,
+          background: "#ff4785",
+          color: "#fff",
+          padding: "14px 24px",
+          borderRadius: "14px",
+          boxShadow: "0 8px 30px rgba(255, 71, 133, 0.4)",
+          fontWeight: "bold",
+          fontSize: "15px",
+          display: "flex",
+          alignItems: "center",
+          gap: "14px",
+          border: "2px solid #ffffff",
+        }}>
+          <span>⚠️ {errorMessage}</span>
+          <button
+            style={{
+              background: "rgba(255, 255, 255, 0.25)",
+              border: 0,
+              color: "#fff",
+              padding: "6px 12px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontWeight: "bold",
+              fontSize: "13px",
+              transition: "all 0.2s",
+            }}
+            onClick={() => setErrorMessage("")}
+          >
+            확인
+          </button>
         </div>
       )}
 

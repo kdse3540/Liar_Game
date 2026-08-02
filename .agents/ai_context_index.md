@@ -275,6 +275,14 @@
 ---
 
 ---
+## [2026-08-03 / 🔗 방 초대 링크(?room=CODE) 대기실 진입 보완 및 소켓 연결 예외 처리 강화]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx`, `d:\Make_Game\Liar_Game\src\services\socket.ts`
+- **핵심 기능 및 역할:** 초대 URL(?room=방코드 및 ?roomCode=방코드)로 외부 유저 접속 시 `socket.connect()` 자동 수립 보장 및 `join-room` 전송 시 소켓 연결 점검 로직 추가. 방 입력 코드 대소문자/공백 자동 보정 및 입장 실패(존재하지 않는 방, 정원 초과 등) 시 선명한 상단 경고 팝업 모달 UI 적용.
+- **주요 함수/에셋 레퍼런스:** `useEffect([location.search])`, `handleProceedToRoom`, `handleJoinRoom`, `handlePassSubmit`, `socket.connect()`, `errorMessage`
+- **특이사항/의존성:** 초대 링크 접속자가 닉네임 설정 후 대기실 진입 실패 없이 100% 정상 접속되도록 안정화 완료.
+---
+
+---
 ## [2026-08-03 / 🍌 바나나(Banana.png) 및 터진 바나나(Broken_Banana.png) 이미지파일명 원복 및 깃 Sync]
 - **관련 파일 경로:** `Items/Banana.png`, `Items/Broken_Banana.png`, `public/items/banana.png`, `public/items/broken_banana.png`
 - **핵심 기능 및 역할:** 바나나(던지기 전)와 터진 바나나(던진 후)의 이미지 및 파일명이 서로 반대로 교체되어 있던 문제를 원래 위치로 원복함. `Items/` 및 `public/items/` 내의 바나나 이미지 파일들을 올바르게 교체 동기화함.
