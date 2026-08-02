@@ -274,6 +274,14 @@
 - **특이사항/의존성:** Vercel/Netlify 등 클라우드 배포 환경에서 복사한 초대 링크로 외부 플레이어가 100% 정상 접속 가능함.
 ---
 
+---
+## [2026-08-03 / 🍌 바나나(Banana.png) 및 터진 바나나(Broken_Banana.png) 이미지파일명 원복 및 깃 Sync]
+- **관련 파일 경로:** `Items/Banana.png`, `Items/Broken_Banana.png`, `public/items/banana.png`, `public/items/broken_banana.png`
+- **핵심 기능 및 역할:** 바나나(던지기 전)와 터진 바나나(던진 후)의 이미지 및 파일명이 서로 반대로 교체되어 있던 문제를 원래 위치로 원복함. `Items/` 및 `public/items/` 내의 바나나 이미지 파일들을 올바르게 교체 동기화함.
+- **주요 함수/에셋 레퍼런스:** `Items/Banana.png`, `Items/Broken_Banana.png`, `public/items/banana.png`, `public/items/broken_banana.png`
+- **특이사항/의존성:** GitHub main 브랜치 push를 통해 Vercel 등 자동 배포 및 서버에 즉시 적용됨.
+---
+
 
 
 
