@@ -1992,75 +1992,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ── 🔒 관리자 방 생성 비밀번호(0307) 입력 모달 ── */}
-        {adminPassModalOpen && (
-          <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.7)" }}>
-            <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center", border: "3px solid #7652dd" }}>
-              <span className="card-label" style={{ color: "#7652dd" }}>ADMIN AUTHENTICATION</span>
-              <div style={{ fontSize: "54px", margin: "10px 0" }}>🔒</div>
-              <h2 style={{ fontSize: "20px", margin: "5px 0 10px 0", color: "#2b2b2b" }}>
-                관리자 비밀번호 입력
-              </h2>
-              <p style={{ fontSize: "14px", color: "#666", marginBottom: "15px", lineHeight: "1.5" }}>
-                테스트 버전이므로 <b>관리자만 방을 생성</b>할 수 있습니다.
-              </p>
-              
-              <input
-                type="password"
-                value={adminPassInput}
-                onChange={(e) => setAdminPassInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleVerifyAdminPassword(); }}
-                placeholder="비밀번호 입력 (0307)"
-                style={{
-                  width: "100%", padding: "12px 16px", borderRadius: "12px", border: "2px solid #7652dd",
-                  fontSize: "16px", textAlign: "center", marginBottom: "10px"
-                }}
-                autoFocus
-              />
-
-              {adminPassError && (
-                <p style={{ color: "#ff4785", fontSize: "13px", fontWeight: "bold", margin: "5px 0 10px 0" }}>
-                  {adminPassError}
-                </p>
-              )}
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-                <button className="primary-button" style={{ flex: 1 }} onClick={handleVerifyAdminPassword}>
-                  인증 완료 (캐릭터 선택으로) ➔
-                </button>
-                <button
-                  style={{ padding: "12px 16px", borderRadius: "12px", border: "1px solid #ccc", background: "#f0f0f0", cursor: "pointer", fontWeight: "bold" }}
-                  onClick={() => setAdminPassModalOpen(false)}
-                >
-                  취소
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── 🚨 플레이어 이탈 (방장 이탈 / 라이어 이탈 / 인원 부족) 전면 모달 ── */}
-        {disconnectNoticeModal && (
-          <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(16px)", backgroundColor: "rgba(0,0,0,0.85)" }}>
-            <div className="nickname-modal" style={{
-              maxWidth: "480px", width: "90%", textAlign: "center",
-              border: `3px solid ${disconnectNoticeModal.type === "host" ? "#ff4785" : "#ff6f3c"}`,
-              boxShadow: "0 0 45px rgba(255,71,133,0.6)",
-              animation: "popIn 0.3s ease",
-            }}>
-              <span className="card-label" style={{ color: "#ff4785" }}>NOTICE</span>
-              <div style={{ fontSize: "64px", margin: "14px 0" }}>
-                {disconnectNoticeModal.type === "host" ? "👑" : disconnectNoticeModal.type === "liar" ? "🚨" : "📢"}
-              </div>
-              <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#2b2b2b", lineHeight: "1.4" }}>
-                {disconnectNoticeModal.message}
-              </h2>
-              <p style={{ fontSize: "14px", color: "#666" }}>
-                잠시 후 3초 뒤 자동으로 화면이 이동합니다...
-              </p>
-            </div>
-          </div>
-        )}
 
         <div className="astra-game-canvas">
           <main className="astra-game-board">
@@ -2677,6 +2608,75 @@ export default function App() {
             <div style={{ marginTop: "20px", padding: "14px", borderRadius: "14px", background: "#cbf7e6", color: "#059669", fontWeight: "bold", fontSize: "14px" }}>
               🔄 5초 후 2라운드 힌트 발표(각 6초)가 시작됩니다.
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── 🔒 관리자 방 생성 비밀번호(0307) 입력 모달 (모든 screen에서 표출 가능) ── */}
+      {adminPassModalOpen && (
+        <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.7)" }}>
+          <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center", border: "3px solid #7652dd" }}>
+            <span className="card-label" style={{ color: "#7652dd" }}>ADMIN AUTHENTICATION</span>
+            <div style={{ fontSize: "54px", margin: "10px 0" }}>🔒</div>
+            <h2 style={{ fontSize: "20px", margin: "5px 0 10px 0", color: "#2b2b2b" }}>
+              관리자 비밀번호 입력
+            </h2>
+            <p style={{ fontSize: "14px", color: "#666", marginBottom: "15px", lineHeight: "1.5" }}>
+              테스트 버전이므로 <b>관리자만 방을 생성</b>할 수 있습니다.
+            </p>
+            
+            <input
+              type="password"
+              value={adminPassInput}
+              onChange={(e) => setAdminPassInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleVerifyAdminPassword(); }}
+              placeholder="비밀번호 입력 (0307)"
+              style={{
+                width: "100%", padding: "12px 16px", borderRadius: "12px", border: "2px solid #7652dd",
+                fontSize: "16px", textAlign: "center", marginBottom: "10px"
+              }}
+              autoFocus
+            />
+
+            {adminPassError && (
+              <p style={{ color: "#ff4785", fontSize: "13px", fontWeight: "bold", margin: "5px 0 10px 0" }}>
+                {adminPassError}
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+              <button className="primary-button" style={{ flex: 1 }} onClick={handleVerifyAdminPassword}>
+                인증 완료 (캐릭터 선택으로) ➔
+              </button>
+              <button
+                style={{ padding: "12px 16px", borderRadius: "12px", border: "1px solid #ccc", background: "#f0f0f0", cursor: "pointer", fontWeight: "bold" }}
+                onClick={() => setAdminPassModalOpen(false)}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 🚨 플레이어 이탈 (방장 이탈 / 라이어 이탈 / 인원 부족) 전면 모달 (모든 screen에서 표출 가능) ── */}
+      {disconnectNoticeModal && (
+        <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(16px)", backgroundColor: "rgba(0,0,0,0.85)" }}>
+          <div className="nickname-modal" style={{
+            maxWidth: "480px", width: "90%", textAlign: "center",
+            border: `3px solid ${disconnectNoticeModal.type === "host" ? "#ff4785" : "#ff6f3c"}`,
+            boxShadow: "0 0 45px rgba(255,71,133,0.6)",
+            animation: "popIn 0.3s ease",
+          }}>
+            <span className="card-label" style={{ color: "#ff4785" }}>NOTICE</span>
+            <div style={{ fontSize: "64px", margin: "14px 0" }}>
+              {disconnectNoticeModal.type === "host" ? "👑" : disconnectNoticeModal.type === "liar" ? "🚨" : "📢"}
+            </div>
+            <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#2b2b2b", lineHeight: "1.4" }}>
+              {disconnectNoticeModal.message}
+            </h2>
+            <p style={{ fontSize: "14px", color: "#666" }}>
+              잠시 후 3초 뒤 자동으로 화면이 이동합니다...
+            </p>
           </div>
         </div>
       )}
