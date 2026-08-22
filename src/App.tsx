@@ -66,6 +66,16 @@ function getPlayerRecord(player: any) {
   };
 }
 
+// 6자리 무작위 방 코드 생성 헬퍼 함수 (예: R8K3MX)
+function generateRoomCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 function Logo() {
   return <div className="logo" aria-label="라이어 게임"><span>LIAR</span><b>GAME</b><i>!</i></div>;
 }
@@ -923,14 +933,16 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get("room") || params.get("roomCode");
     if (roomFromUrl) {
-      const code = roomFromUrl.toUpperCase().trim();
-      setTargetRoomCode(code);
-      setJoinInputCode(code);
-      setScreen("character"); // 최초 1회 접속 시에만 캐릭터 선택 화면으로 이동
-      
-      // 초대 주소 접속 시 소켓 연결 즉시 수립 보장
-      if (!socket.connected) {
-        socket.connect();
+      const code = roomFromUrl.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().trim();
+      if (code) {
+        setTargetRoomCode(code);
+        setJoinInputCode(code);
+        setScreen("character"); // 최초 1회 접속 시에만 캐릭터 선택 화면으로 이동
+        
+        // 초대 주소 접속 시 소켓 연결 즉시 수립 보장
+        if (!socket.connected) {
+          socket.connect();
+        }
       }
     }
   }, []); // 의존성 배열 []: 최초 마운트 시 1회만 동작!
@@ -957,8 +969,10 @@ export default function App() {
       });
     } else {
       // 새 방을 만드는 방장 -> 0307 인증 완료 상태에서 create-room 발송
+      const finalCode = roomCode || generateRoomCode();
+      setRoomCode(finalCode);
       socket.emit("create-room", {
-        roomCode: roomCode || "MANGO7",
+        roomCode: finalCode,
         roomTitle,
         roomPassword,
         adminPassword: "0307",
@@ -981,6 +995,9 @@ export default function App() {
       setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다.");
       return;
     }
+
+    const newCode = generateRoomCode();
+    setRoomCode(newCode); // 방장이 생성할 6자리 무작위 방 코드 할당
 
     setAdminPassModalOpen(false);
     setAdminPassError("");
