@@ -11,7 +11,7 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
-import { getRandomWord, getCategories, wordCategories } from "./words.js";
+import { getRandomWord, getTwoRandomWords, getCategories, wordCategories } from "./words.js";
 
 const app = express();
 app.use(cors());
@@ -132,6 +132,7 @@ io.on("connection", (socket) => {
       roomPassword: roomPassword || "",
       maxPlayers: Number(maxPlayers) || 12,
       liarCount: Number(liarCount) || 1,
+      gameMode: "fool", // 🎮 게임 모드 기본값: 바보 라이어 모드 (다른 제시어 제공)
       hintTime: Number(hintTime) || 20,
       discussionTime: Number(discussionTime) || 40,
       defenseTime: Number(defenseTime) || 45,
@@ -210,7 +211,7 @@ io.on("connection", (socket) => {
     io.to(code).emit("room-updated", { room });
   });
 
-  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, defenseTime, fastTestMode, selectedCategory }) => {
+  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, fastTestMode, selectedCategory }) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
     if (!room) return;
@@ -223,13 +224,14 @@ io.on("connection", (socket) => {
     if (roomPassword !== undefined) room.roomPassword = roomPassword;
     if (maxPlayers !== undefined) room.maxPlayers = Number(maxPlayers);
     if (liarCount !== undefined) room.liarCount = Number(liarCount);
+    if (gameMode !== undefined) room.gameMode = gameMode;
     if (hintTime !== undefined) room.hintTime = Number(hintTime);
     if (discussionTime !== undefined) room.discussionTime = Number(discussionTime);
     if (defenseTime !== undefined) room.defenseTime = Number(defenseTime);
     if (fastTestMode !== undefined) room.fastTestMode = Boolean(fastTestMode);
     if (selectedCategory !== undefined) room.selectedCategory = selectedCategory;
 
-    console.log(`⚙️ [방 설정 변경] 방: ${code}, 힌트시간: ${room.hintTime}초, 변론시간: ${room.defenseTime}초, 주제: ${room.selectedCategory}`);
+    console.log(`⚙️ [방 설정 변경] 방: ${code}, 모드: ${room.gameMode}, 힌트시간: ${room.hintTime}초, 변론시간: ${room.defenseTime}초, 주제: ${room.selectedCategory}`);
 
     io.to(code).emit("room-updated", { room, categories: getCategories() });
   });
@@ -325,33 +327,52 @@ io.on("connection", (socket) => {
       });
     }
 
-    // 제시어 및 카테고리 무작위(또는 지정된 주제) 선출
-    const wordInfo = getRandomWord(room.selectedCategory);
+    // 제시어 및 카테고리 선출 (게임 모드 반영)
+    const isFoolMode = (room.gameMode || "fool") === "fool";
+    let wordInfo;
+    if (isFoolMode) {
+      // 🤪 바보 라이어 모드 (기본값): 시민용 제시어(word1)와 라이어용 다른 제시어(word2)를 추출
+      const twoWords = getTwoRandomWords(room.selectedCategory);
+      wordInfo = {
+        category: twoWords.category,
+        word: twoWords.word1, // 시민이 받는 진짜 제시어
+        foolWord: twoWords.word2, // 라이어가 받는 다른 제시어
+      };
+    } else {
+      // 😈 클래식 라이어 모드: 1개의 제시어 추출
+      const singleWord = getRandomWord(room.selectedCategory);
+      wordInfo = {
+        category: singleWord.category,
+        word: singleWord.word,
+        foolWord: "🚨 라이어",
+      };
+    }
+
     room.currentWordInfo = wordInfo;
     room.gameState = "playing";
     room.phase = "hint-turn";
     room.round = 1;
     room.playerHints = {}; // 게임 시작 시 힌트 기록 초기화
 
-    // 3) 라이어(Liar) 무작위 선출 (Fisher-Yates 셔플 알고리즘 적용: 방장 편향 없이 전원 1/N 완전 동일 확률 보장!)
+    // 3) 라이어(Liar) 무작위 선출 (Fisher-Yates 셔플 알고리즘 적용)
     const allSocketIds = room.players.map((p) => p.socketId);
     const shuffledSocketIds = shuffleArray(allSocketIds);
     const actualLiarCount = Math.min(room.liarCount, room.players.length - 1);
     room.liarSocketIds = shuffledSocketIds.slice(0, actualLiarCount);
 
     const liarNames = room.liarSocketIds.map(id => room.players.find(p => p.socketId === id)?.name).join(", ");
-    console.log(`🎮 [게임 시작] 방: ${code}, 제시어: ${wordInfo.word}, 라이어(${actualLiarCount}명): ${liarNames}`);
+    console.log(`🎮 [게임 시작] 방: ${code}, 모드: ${room.gameMode || "fool"}, 진짜제시어: ${wordInfo.word}, 라이어제시어: ${wordInfo.foolWord}, 라이어(${actualLiarCount}명): ${liarNames}`);
 
     // 4) 방 턴 및 투표 상태 초기화
     room.turnIndex = 0;
     room.turnCount = 0;
-    room.phase = "countdown"; // countdown -> word-notice -> hint-turn -> free-talk -> vote -> result
+    room.phase = "countdown";
     room.round = 1;
     room.activeSpeakerSocketId = room.players[0]?.socketId || "";
     room.votes = {};
-    room.eliminatedSocketIds = []; // 탈락자 목록 (흑백 & 채팅권 박탈)
+    room.eliminatedSocketIds = [];
 
-    // 매 판 시작 시 인당 아이템 4종(토마토, 달걀, 물풍선, 바나나) 각 2개씩 지급 및 오염 청소
+    // 매 판 시작 시 인당 아이템 4종 지급
     room.players.forEach((p) => {
       p.inventory = { tomato: 2, egg: 2, water: 2, banana: 2 };
       p.stains = [];
@@ -360,11 +381,18 @@ io.on("connection", (socket) => {
     // 5) 각 플레이어에게 개별 역할 및 비밀 제시어 송신
     room.players.forEach((p) => {
       const isLiar = room.liarSocketIds.includes(p.socketId);
+      const givenWord = isLiar
+        ? (isFoolMode ? wordInfo.foolWord : "🚨 라이어")
+        : wordInfo.word;
+
       io.to(p.socketId).emit("game-started", {
         room,
         category: wordInfo.category,
-        word: isLiar ? "🚨 라이어" : wordInfo.word,
+        word: givenWord,
+        realWord: wordInfo.word,
+        foolWord: wordInfo.foolWord,
         isLiar,
+        gameMode: room.gameMode || "fool",
         activeSpeakerSocketId: room.activeSpeakerSocketId,
       });
     });
@@ -1032,6 +1060,12 @@ io.on("connection", (socket) => {
     const room = rooms[code];
     if (!room) return;
 
+    const targetPlayer = room.players.find((p) => p.socketId === targetSocketId);
+    const isActualLiar = room.liarSocketIds.includes(targetSocketId);
+    const gameMode = room.gameMode || "fool";
+    const realWord = room.currentWordInfo?.word || "";
+    const liarWord = room.currentWordInfo?.foolWord || "🚨 라이어";
+
     // 참가자별 실제 승패 누적 카운트업
     room.players.forEach(p => {
       if (!p.stats) {
@@ -1072,6 +1106,9 @@ io.on("connection", (socket) => {
         liarSocketIds: room.liarSocketIds,
         liarNames: room.liarSocketIds.map(id => room.players.find(p => p.socketId === id)?.name || "참여자"),
         citizenWin: isActualLiar,
+        gameMode,
+        realWord,
+        liarWord,
         resultMessage: isActualLiar
           ? `🏆 시민 팀 승리! [${targetPlayer?.name}]은(는) 라이어였습니다!`
           : `😈 라이어 승리! [${targetPlayer?.name}]은(는) 라이어가 아니었습니다!`,

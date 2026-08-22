@@ -287,7 +287,12 @@
 - **관련 파일 경로:** `Items/Banana.png`, `Items/Broken_Banana.png`, `public/items/banana.png`, `public/items/broken_banana.png`
 - **핵심 기능 및 역할:** 바나나(던지기 전)와 터진 바나나(던진 후)의 이미지 및 파일명이 서로 반대로 교체되어 있던 문제를 원래 위치로 원복함. `Items/` 및 `public/items/` 내의 바나나 이미지 파일들을 올바르게 교체 동기화함.
 - **주요 함수/에셋 레퍼런스:** `Items/Banana.png`, `Items/Broken_Banana.png`, `public/items/banana.png`, `public/items/broken_banana.png`
-- **특이사항/의존성:** GitHub main 브랜치 push를 통해 Vercel 등 자동 배포 및 서버에 즉시 적용됨.
+---
+## [2026-08-23 / 🤪 바보 라이어 모드(다른 제시어 제공) 기본화 및 대기실 😈 클래식 모드 선택 옵션 추가]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` (`start-game`, `update-room-settings`, `revealLiarResult`), `d:\Make_Game\Liar_Game\src\App.tsx` (`gameMode` state, 대기실 `ROUND SETTINGS` 패널 UI, `gameResultData` 제시어 표출)
+- **핵심 기능 및 역할:** 라이어에게 "🚨 라이어" 문구 대신 동일 카테고리 내의 다른 제시어를 부여하는 `🤪 바보 라이어 모드`를 기본값(Default)으로 지정하고, 방장이 대기실에서 `😈 클래식 라이어 모드`를 선택할 수 있도록 옵션 확장. 게임 종료 시 진짜 제시어와 라이어가 받은 다른 제시어를 시각화하여 안내.
+- **주요 함수/에셋 레퍼런스:** `gameMode` ("fool" | "classic"), `getTwoRandomWords`, `start-game` 이벤트, `revealLiarResult`, `handleUpdateRoomSettings`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료. `2026-08-23_라이어_다른제시어_제공_기획_SPEC.md` 반영 완료.
 ---
 
 

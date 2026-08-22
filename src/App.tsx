@@ -168,6 +168,7 @@ export default function App() {
   const [hintTime, setHintTime] = useState("60");
   const [defenseTime, setDefenseTime] = useState("45");
   const [liarCount, setLiarCount] = useState("1");
+  const [gameMode, setGameMode] = useState<"fool" | "classic">("fool"); // 🎮 게임 모드 (fool: 바보 라이어(기본값), classic: 클래식 라이어)
   const [selectedCategory, setSelectedCategory] = useState("ALL"); // 주제 카테고리 (ALL: 전체 무작위)
   const [categories, setCategories] = useState<string[]>(["ALL", "장소 / 놀거리", "음식 / 디저트", "직업", "동식물", "전자제품"]);
   const [fastTestMode, setFastTestMode] = useState<boolean>(false); // 테스트용 초스피드 모드 (모든 타이머 1초)
@@ -264,7 +265,7 @@ export default function App() {
     }, 1200);
   };
 
-  // 대기실 방 설정(힌트시간, 토론시간 등) 변경 시 백엔드로 즉시 실시간 소켓 송신
+  // 대기실 방 설정(게임모드, 힌트시간, 토론시간 등) 변경 시 백엔드로 즉시 실시간 소켓 송신
   const handleUpdateRoomSettings = (overrides?: any) => {
     if (!isHost) return;
     socket.emit("update-room-settings", {
@@ -272,8 +273,10 @@ export default function App() {
       roomPassword: overrides?.roomPassword ?? roomPassword,
       maxPlayers: overrides?.maxPlayers ?? maxPlayers,
       liarCount: overrides?.liarCount ?? liarCount,
+      gameMode: overrides?.gameMode ?? gameMode,
       hintTime: overrides?.hintTime ?? hintTime,
       discussionTime: overrides?.discussionTime ?? discussionTime,
+      defenseTime: overrides?.defenseTime ?? defenseTime,
       fastTestMode: overrides?.fastTestMode ?? fastTestMode,
       selectedCategory: overrides?.selectedCategory ?? selectedCategory,
     });
@@ -321,6 +324,7 @@ export default function App() {
       setRoomTitle(room.roomTitle);
       setMaxPlayers(room.maxPlayers);
       setLiarCount(String(room.liarCount));
+      if (room.gameMode) setGameMode(room.gameMode);
       setOnlinePlayers(room.players);
       setMyPlayerInfo(myPlayer);
       setIsHost(myPlayer.isHost);
@@ -345,6 +349,7 @@ export default function App() {
       if (room.discussionTime) setDiscussionTime(String(room.discussionTime));
       if (room.defenseTime) setDefenseTime(String(room.defenseTime));
       if (room.liarCount) setLiarCount(String(room.liarCount));
+      if (room.gameMode) setGameMode(room.gameMode);
       if (room.fastTestMode !== undefined) setFastTestMode(room.fastTestMode);
       if (room.selectedCategory) setSelectedCategory(room.selectedCategory);
       if (room.playerHints) setPlayerHints(room.playerHints);
@@ -1145,6 +1150,20 @@ export default function App() {
                   </select>
                 </label>
 
+                <label className="field-label" style={{ fontWeight: "bold" }}>🎮 게임 모드
+                  <select
+                    value={gameMode}
+                    onChange={(event) => {
+                      const val = event.target.value as "fool" | "classic";
+                      setGameMode(val);
+                      handleUpdateRoomSettings({ gameMode: val });
+                    }}
+                  >
+                    <option value="fool">🤪 바보 라이어 (다른 제시어 / 기본값)</option>
+                    <option value="classic">😈 클래식 라이어 (🚨 라이어 표기)</option>
+                  </select>
+                </label>
+
                 <label className="field-label">최대 인원<select value={maxPlayers} onChange={(event) => setMaxPlayers(Number(event.target.value))}>{[4, 6, 8, 10, 12, 14].map((count) => <option value={count} key={count}>{count}명</option>)}</select></label>
                 <div className="rule-line" />
                 <span className="card-label">ROUND SETTINGS</span>
@@ -1239,6 +1258,7 @@ export default function App() {
               /* 일반 참여자용 방 정보 요약 표시 */
               <div style={{ margin: "15px 0", fontSize: "13px", lineHeight: "1.8", color: "#5a5557" }}>
                 <p><b>방 제목:</b> {roomTitle}</p>
+                <p><b>게임 모드:</b> {gameMode === "fool" ? "🤪 바보 라이어 (다른 제시어 제공)" : "😈 클래식 라이어 (🚨 라이어 표기)"}</p>
                 <p><b>최대 인원:</b> {maxPlayers}명</p>
                 <p><b>라이어 수:</b> {liarCount}명</p>
                 <p><b>힌트 / 토론 / 변론시간:</b> {hintTime}초 / {discussionTime}초 / {defenseTime}초</p>
@@ -1832,8 +1852,23 @@ export default function App() {
               <p style={{ fontSize: "18px", fontWeight: "bold", color: "#2b2b2b" }}>
                 [{gameResultData.targetName}]은(는) {gameResultData.isActualLiar ? "라이어였습니다!" : "라이어가 아니었습니다!"}
               </p>
+              
+              {/* 🔑 제시어 및 라이어 다른 제시어 공개 카드 */}
+              {gameResultData.realWord && (
+                <div style={{ margin: "14px 0", padding: "12px 16px", borderRadius: "12px", background: "#f5f0ff", border: "2px dashed #7652dd", textAlign: "left" }}>
+                  <p style={{ margin: "0 0 6px 0", fontSize: "14px", color: "#4338ca", fontWeight: "bold" }}>
+                    🔑 진짜 제시어: <span style={{ color: "#635bff", fontSize: "16px" }}>[{gameResultData.realWord}]</span>
+                  </p>
+                  {gameResultData.gameMode === "fool" && gameResultData.liarWord && (
+                    <p style={{ margin: 0, fontSize: "14px", color: "#ff4785", fontWeight: "bold" }}>
+                      🤪 라이어가 받은 제시어: <span style={{ color: "#ff4785", fontSize: "16px" }}>[{gameResultData.liarWord}]</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               {gameResultData.liarNames && (
-                <p style={{ fontSize: "14px", color: "#666", marginTop: "10px" }}>
+                <p style={{ fontSize: "14px", color: "#666", marginTop: "8px" }}>
                   진짜 라이어: <b>{gameResultData.liarNames.join(", ")}</b>
                 </p>
               )}
