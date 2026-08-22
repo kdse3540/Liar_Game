@@ -978,7 +978,7 @@ export default function App() {
   // [관리자 비밀번호 0307 확인 후 캐릭터 생성 창 이동 함수]
   const handleVerifyAdminPassword = () => {
     if (adminPassInput.trim() !== "0307") {
-      setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다. (테스트 비밀번호: 0307)");
+      setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다.");
       return;
     }
 
@@ -2629,7 +2629,7 @@ export default function App() {
               value={adminPassInput}
               onChange={(e) => setAdminPassInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleVerifyAdminPassword(); }}
-              placeholder="비밀번호 입력 (0307)"
+              placeholder="비밀번호 입력"
               style={{
                 width: "100%", padding: "12px 16px", borderRadius: "12px", border: "2px solid #7652dd",
                 fontSize: "16px", textAlign: "center", marginBottom: "10px"
