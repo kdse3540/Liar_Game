@@ -22,17 +22,92 @@ type Screen = "home" | "character" | "room" | "play";
 // --------------------------------------------------------------------
 // 2. 초기 데이터 (Mock Data)
 // --------------------------------------------------------------------
-const portraits = ["🦊", "🐻", "🐣", "🐰", "🐸", "🐹", "🐯", "🐼", "🦁", "🐨", "🐶", "🐱", "🦄", "🐙"];
-
-// 기본 6명 디폴트 플레이어
-const defaultPlayers = [
-  { name: "모카", icon: "🦊", ready: true, color: "#ff6f3c", softColor: "#ffe3d1" },
-  { name: "밤비", icon: "🐻", ready: true, color: "#4a8eff", softColor: "#dbeaff" },
-  { name: "구름", icon: "🐣", ready: false, color: "#f5b300", softColor: "#fff2c4" },
-  { name: "해나", icon: "🐰", ready: true, color: "#9b51e0", softColor: "#eedfff" },
-  { name: "나", icon: "🐸", ready: true, color: "#10b981", softColor: "#cbf7e6" },
-  { name: "단추", icon: "🐹", ready: true, color: "#ff4785", softColor: "#ffdbe8" },
+// [캐릭터 포트레이트 목록]
+// 'Portrait' 폴더에 저장된 14개의 고유 캐릭터 일러스트 이미지 경로 목록입니다.
+const portraits = [
+  "/portraits/Portrait_01.png",
+  "/portraits/Portrait_02.png",
+  "/portraits/Portrait_03.png",
+  "/portraits/Portrait_04.png",
+  "/portraits/Portrait_05.png",
+  "/portraits/Portrait_06.png",
+  "/portraits/Portrait_07.png",
+  "/portraits/Portrait_08.png",
+  "/portraits/Portrait_09.png",
+  "/portraits/Portrait_10.png",
+  "/portraits/Portrait_11.png",
+  "/portraits/Portrait_12.png",
+  "/portraits/Portrait_13.png",
+  "/portraits/Portrait_14.png",
 ];
+
+// 기본 6명 디폴트 플레이어 (초기 로딩 및 싱글 테스트용 데이터)
+const defaultPlayers = [
+  { name: "모카", icon: "/portraits/Portrait_01.png", ready: true, color: "#ff6f3c", softColor: "#ffe3d1" },
+  { name: "밤비", icon: "/portraits/Portrait_02.png", ready: true, color: "#4a8eff", softColor: "#dbeaff" },
+  { name: "구름", icon: "/portraits/Portrait_03.png", ready: false, color: "#f5b300", softColor: "#fff2c4" },
+  { name: "해나", icon: "/portraits/Portrait_04.png", ready: true, color: "#9b51e0", softColor: "#eedfff" },
+  { name: "나", icon: "/portraits/Portrait_05.png", ready: true, color: "#10b981", softColor: "#cbf7e6" },
+  { name: "단추", icon: "/portraits/Portrait_06.png", ready: true, color: "#ff4785", softColor: "#ffdbe8" },
+];
+
+/**
+ * [플레이어 아이콘/포트레이트 렌더링 헬퍼 컴포넌트]
+ * - 이미지 경로(예: /portraits/Portrait_01.png)인 경우 <img> 태그로 깔끔하게 렌더링합니다.
+ * - 이모지 또는 문자열인 경우 기존처럼 텍스트 형태로 안전하게 표시합니다.
+ */
+function PlayerIcon({
+  icon,
+  size = "1em",
+  alt = "캐릭터 포트레이트",
+  className = "",
+  style,
+}: {
+  icon?: string;
+  size?: number | string;
+  alt?: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const isImage =
+    typeof icon === "string" &&
+    (icon.startsWith("/") || icon.startsWith("http") || icon.startsWith("data:"));
+
+  const sizeVal = typeof size === "number" ? `${size}px` : size;
+
+  if (isImage) {
+    return (
+      <img
+        src={icon}
+        alt={alt}
+        className={`player-icon-img ${className}`}
+        style={{
+          width: sizeVal,
+          height: sizeVal,
+          objectFit: "cover",
+          borderRadius: "inherit",
+          display: "inline-block",
+          verticalAlign: "middle",
+          ...style,
+        }}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={className}
+      style={{
+        fontSize: sizeVal,
+        display: "inline-block",
+        verticalAlign: "middle",
+        ...style,
+      }}
+    >
+      {icon || "🦊"}
+    </span>
+  );
+}
 
 // 플레이어 시민/라이어 실시간 전적(승패) 및 대표 업적 칭호 산출 헬퍼 함수
 function getPlayerRecord(player: any) {
@@ -138,8 +213,9 @@ function PlayerChip({
           {speech}
         </div>
       )}
+      {/* 플레이어 아바타 (포트레이트 이미지 또는 이모지) */}
       <div className="avatar" style={{ background: player.color }}>
-        {icon}
+        <PlayerIcon icon={icon} size="100%" />
       </div>
       <span>{displayName ?? player.name}</span>
       {!compact && (
@@ -222,7 +298,7 @@ export default function App() {
 
   // 사용자가 닉네임을 작성하지 않으면 무작위 조합 닉네임(defaultNickname)을 자동 사용함
   const currentNickname = nickname.trim() || defaultNickname;
-  const myIcon = portraits[selectedPortrait] || "🦊";
+  const myIcon = portraits[selectedPortrait] || portraits[0];
 
   // 새 채팅 메시지 추가 시 대기실 및 플레이 화면 채팅창을 최하단(최신 메시지)으로 자동 스크롤
   useEffect(() => {
@@ -963,7 +1039,7 @@ export default function App() {
   // [캐릭터 생성 후 대기실 이동 / 생성 / 참여 소켓 제출 함수]
   const handleProceedToRoom = () => {
     const currentNickname = nickname.trim() || defaultNickname;
-    const myIcon = portraits[selectedPortrait] || "🦊";
+    const myIcon = portraits[selectedPortrait] || portraits[0];
 
     // 소켓 연결 끊김 방지 자동 재연결 처리
     if (!socket.connected) {
@@ -1024,7 +1100,7 @@ export default function App() {
   const handleJoinRoom = () => {
     if (!joinInputCode.trim()) return;
     const currentNickname = nickname.trim() || defaultNickname;
-    const myIcon = portraits[selectedPortrait] || "🦊";
+    const myIcon = portraits[selectedPortrait] || portraits[0];
 
     if (!socket.connected) {
       socket.connect();
@@ -1041,7 +1117,7 @@ export default function App() {
   // [비밀번호 제출 처리 함수]
   const handlePassSubmit = () => {
     const currentNickname = nickname.trim() || defaultNickname;
-    const myIcon = portraits[selectedPortrait] || "🦊";
+    const myIcon = portraits[selectedPortrait] || portraits[0];
 
     if (!socket.connected) {
       socket.connect();
@@ -1186,8 +1262,34 @@ export default function App() {
           <p>{targetRoomCode ? "게임에서 사용할 나만의 프로필을 설정해 주세요." : "나를 닮은 포트레이트와 이름을 골라주세요."}</p>
         </div>
         <article className="character-card">
-          <div className="character-card-head"><div><span className="card-label">STEP 01 / 01</span><h2>오늘의 나는 누구?</h2></div><span className="portrait-count">{selectedPortrait + 1} / {portraits.length}</span></div>
-          <div className="portrait-grid">{portraits.map((portrait, index) => <button key={`${portrait}-${index}`} aria-label={`${index + 1}번 포트레이트`} onClick={() => setSelectedPortrait(index)} className={selectedPortrait === index ? "portrait-choice selected" : "portrait-choice"}><span>{portrait}</span>{selectedPortrait === index && <b>선택됨</b>}</button>)}</div>
+          <div className="character-card-head">
+            <div>
+              <span className="card-label">STEP 01 / 01</span>
+              <h2>오늘의 나는 누구?</h2>
+            </div>
+            <span className="portrait-count">{selectedPortrait + 1} / {portraits.length}</span>
+          </div>
+
+          {/* 14개의 캐릭터 포트레이트 선택 그리드 */}
+          <div className="portrait-grid">
+            {portraits.map((portrait, index) => (
+              <button
+                key={`${portrait}-${index}`}
+                type="button"
+                aria-label={`${index + 1}번 캐릭터 포트레이트`}
+                onClick={() => setSelectedPortrait(index)}
+                className={selectedPortrait === index ? "portrait-choice selected" : "portrait-choice"}
+              >
+                <img
+                  src={portrait}
+                  alt={`${index + 1}번 캐릭터`}
+                  className="portrait-img"
+                  loading="lazy"
+                />
+                {selectedPortrait === index && <b>선택됨</b>}
+              </button>
+            ))}
+          </div>
           <div className="profile-divider" />
           <div className="nickname-entry" style={{ flexDirection: "column", gap: "14px", alignItems: "stretch" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1504,9 +1606,9 @@ export default function App() {
               </div>
 
               <div style={{ textAlign: "center", margin: "10px 0 15px" }}>
-                {/* 포트레이트 이모지 큰 아바타 */}
-                <div style={{ fontSize: "56px", display: "inline-block", padding: "12px", borderRadius: "50%", background: selectedProfilePlayer.softColor || "#f1edff", border: "2px solid #635bff" }}>
-                  {selectedProfilePlayer.icon}
+                {/* 포트레이트 큰 아바타 */}
+                <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "80px", height: "80px", borderRadius: "50%", background: selectedProfilePlayer.softColor || "#f1edff", border: "2px solid #635bff", overflow: "hidden" }}>
+                  <PlayerIcon icon={selectedProfilePlayer.icon} size={64} style={{ borderRadius: "50%" }} />
                 </div>
                 <h2 style={{ fontSize: "24px", margin: "10px 0 4px", color: "#2b2b2b" }}>
                   {selectedProfilePlayer.name}
@@ -1636,7 +1738,9 @@ export default function App() {
           <div className="modal-backdrop" style={{ backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.65)", zIndex: 9999 }}>
             <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", textAlign: "center", border: "3px solid #ff4785", boxShadow: "0 0 35px rgba(255,71,133,0.5)", animation: "popIn 0.3s ease" }}>
               <span className="card-label" style={{ color: "#ff4785" }}>HINT SPEAKER TURN</span>
-              <div style={{ fontSize: "64px", margin: "12px 0" }}>{speakerTurnNotice.icon}</div>
+              <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+                <PlayerIcon icon={speakerTurnNotice.icon} size={64} style={{ borderRadius: "16px" }} />
+              </div>
               <h2 style={{ fontSize: "24px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
                 📢 <span style={{ color: "#ff4785" }}>[{speakerTurnNotice.name}]</span> 님의 발언 차례!
               </h2>
@@ -1672,7 +1776,9 @@ export default function App() {
                       transition: "all 0.2s",
                     }}
                   >
-                    <span style={{ fontSize: "22px" }}>{player.icon}</span>
+                    <div style={{ width: "28px", height: "28px", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "8px", overflow: "hidden" }}>
+                      <PlayerIcon icon={player.icon} size={28} />
+                    </div>
                     <span style={{ fontWeight: "bold", fontSize: "14px", flex: 1, textAlign: "left", color: "#2b2b2b" }}>{player.name}</span>
                     {selectedVoteTarget === player.socketId && <b style={{ color: "#ff4785" }}>선택됨</b>}
                   </button>
@@ -1744,8 +1850,14 @@ export default function App() {
 
               {/* 룰렛 회전 연출 박스 */}
               <div style={{ margin: "25px 0", padding: "20px", background: "#f8f6f0", borderRadius: "16px", border: "2px solid #e8e2d6" }}>
-                <div style={{ fontSize: "54px", transform: isRouletteSpinning ? "scale(1.2)" : "scale(1)", transition: "all 0.2s" }}>
-                  {isRouletteSpinning ? "🌀" : rouletteData.chosenPlayer?.icon || "🎯"}
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60px", transform: isRouletteSpinning ? "scale(1.2)" : "scale(1)", transition: "all 0.2s" }}>
+                  {isRouletteSpinning ? (
+                    <span style={{ fontSize: "54px" }}>🌀</span>
+                  ) : (
+                    <div style={{ width: "60px", height: "60px", borderRadius: "14px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                      <PlayerIcon icon={rouletteData.chosenPlayer?.icon || "🎯"} size={60} />
+                    </div>
+                  )}
                 </div>
                 <h3 style={{ fontSize: "22px", margin: "10px 0", color: isRouletteSpinning ? "#999" : "#ff4785" }}>
                   {isRouletteSpinning ? "두구두구..." : rouletteData.chosenPlayer?.name}
@@ -1772,8 +1884,10 @@ export default function App() {
               </span>
               {/* 발언자 아이콘 (최후변론/자기변호/남길말 시) */}
               {(gamePhase === "final-defense" || gamePhase === "self-defense" || gamePhase === "last-words") && (
-                <div style={{ fontSize: "64px", margin: "12px 0" }}>
-                  {onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.icon || "🦊"}
+                <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+                  <div style={{ width: "64px", height: "64px", borderRadius: "16px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <PlayerIcon icon={onlinePlayers.find(p => p.socketId === turnSpeakerSocketId)?.icon || portraits[0]} size={64} />
+                  </div>
                 </div>
               )}
               <h2 style={{ fontSize: "24px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
@@ -1828,7 +1942,11 @@ export default function App() {
           <div className="modal-backdrop" style={{ zIndex: 9980 }}>
             <div className="nickname-modal" style={{ maxWidth: "460px", width: "90%", border: "3px solid #10b981", boxShadow: "0 0 30px rgba(16,185,129,0.4)" }}>
               <span className="card-label" style={{ color: "#10b981" }}>FINAL DECISION</span>
-              <div style={{ fontSize: "54px", margin: "10px 0" }}>{finalDecisionTarget.icon}</div>
+              <div style={{ margin: "10px 0", display: "flex", justifyContent: "center" }}>
+                <div style={{ width: "60px", height: "60px", borderRadius: "16px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <PlayerIcon icon={finalDecisionTarget.icon} size={60} />
+                </div>
+              </div>
               <h2 style={{ fontSize: "20px", margin: "5px 0 10px 0", color: "#2b2b2b" }}>
                 🗳️ <span style={{ color: "#ff4785" }}>[{finalDecisionTarget.name}]</span>은(는) 라이어인가요?
               </h2>
@@ -1948,7 +2066,9 @@ export default function App() {
                               background: selectedReVoteTarget === candidateId ? "#ffe3d1" : "#fff",
                             }}
                           >
-                            <span style={{ fontSize: "22px" }}>{player?.icon || "🦊"}</span>
+                            <div style={{ width: "28px", height: "28px", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "8px", overflow: "hidden" }}>
+                              <PlayerIcon icon={player?.icon || portraits[0]} size={28} />
+                            </div>
                             <span style={{ fontWeight: "bold", fontSize: "14px", flex: 1, textAlign: "left", color: "#2b2b2b" }}>{player?.name || "참여자"}</span>
                             {selectedReVoteTarget === candidateId && <b style={{ color: "#ff6f3c" }}>선택됨</b>}
                           </button>
@@ -2312,7 +2432,7 @@ export default function App() {
                     {/* 충돌 시 머리 위에 떠오르는 [🎯 던진 사람: 🦊 닉네임] 표식 */}
                     {hitBadge && (
                       <div className="throw-hit-sender-badge">
-                        🎯 던진 사람: {hitBadge.senderIcon} {hitBadge.senderName}
+                        🎯 던진 사람: <PlayerIcon icon={hitBadge.senderIcon} size={16} /> {hitBadge.senderName}
                       </div>
                     )}
 
@@ -2358,7 +2478,11 @@ export default function App() {
           <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setItemTargetPlayer(null)}>
             <div className="nickname-modal" style={{ maxWidth: "380px", width: "90%", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
               <span className="card-label" style={{ color: "#ff4785" }}>ITEM THROW</span>
-              <div style={{ fontSize: "44px", margin: "8px 0" }}>{itemTargetPlayer.icon}</div>
+              <div style={{ margin: "8px 0", display: "flex", justifyContent: "center" }}>
+                <div style={{ width: "50px", height: "50px", borderRadius: "14px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <PlayerIcon icon={itemTargetPlayer.icon} size={50} />
+                </div>
+              </div>
               <h2 style={{ fontSize: "20px", margin: "4px 0 10px 0", color: "#2b2b2b" }}>
                 🎯 <span style={{ color: "#ff4785" }}>[{itemTargetPlayer.name}]</span> 님에게 투척!
               </h2>
@@ -2386,7 +2510,7 @@ export default function App() {
                         setItemTargetPlayer(null);
                       }}
                       style={{
-                        padding: "12px",
+                        padding: "14px",
                         borderRadius: "14px",
                         border: `2px solid ${isDisabled ? "#ccc" : item.color}`,
                         background: isDisabled ? "#f3f4f6" : item.bg,
@@ -2399,7 +2523,7 @@ export default function App() {
                         transition: "all 0.2s ease",
                       }}
                     >
-                      <img src={`/items/${item.type.toLowerCase()}.png`} alt={item.name} style={{ width: "38px", height: "38px", objectFit: "contain" }} />
+                      <div style={{ fontSize: "28px" }}>{item.icon}</div>
                       <b style={{ fontSize: "13px", color: isDisabled ? "#888" : item.color }}>{item.name}</b>
                       <small style={{ fontSize: "10px", color: isDisabled ? "#aaa" : "#555", fontWeight: "bold" }}>
                         {count > 0 ? `남은수량: ${count}/2개` : "소진됨 (0/2)"}
@@ -2453,7 +2577,11 @@ export default function App() {
         <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setSelectedHintPlayer(null)}>
           <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
             <span className="card-label" style={{ color: "#ffb703" }}>HINT HISTORY</span>
-            <div style={{ fontSize: "48px", margin: "8px 0" }}>{selectedHintPlayer.icon}</div>
+            <div style={{ margin: "8px 0", display: "flex", justifyContent: "center" }}>
+              <div style={{ width: "52px", height: "52px", borderRadius: "14px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <PlayerIcon icon={selectedHintPlayer.icon} size={52} />
+              </div>
+            </div>
             <h2 style={{ fontSize: "20px", margin: "4px 0 14px 0", color: "#2b2b2b" }}>
               💡 <span style={{ color: "#635bff" }}>[{selectedHintPlayer.name}]</span> 님의 힌트 히스토리
             </h2>
@@ -2587,7 +2715,11 @@ export default function App() {
           <div className="nickname-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "460px", width: "90%", border: `3px solid ${selectedHintPlayer.color || "#635bff"}`, boxShadow: `0 0 30px ${selectedHintPlayer.softColor || "rgba(99,91,255,0.4)"}` }}>
             <button className="close" onClick={() => setSelectedHintPlayer(null)}>×</button>
             <span className="card-label" style={{ color: selectedHintPlayer.color || "#635bff" }}>PLAYER HINT HISTORY</span>
-            <div style={{ fontSize: "56px", margin: "10px 0" }}>{selectedHintPlayer.icon}</div>
+            <div style={{ margin: "10px 0", display: "flex", justifyContent: "center" }}>
+              <div style={{ width: "56px", height: "56px", borderRadius: "14px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <PlayerIcon icon={selectedHintPlayer.icon} size={56} />
+              </div>
+            </div>
             <h2 style={{ fontSize: "20px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
               <span style={{ color: selectedHintPlayer.color || "#635bff" }}>[{selectedHintPlayer.name}]</span> 님의 힌트 제출 기록
             </h2>
@@ -2628,7 +2760,11 @@ export default function App() {
             animation: "popIn 0.3s ease",
           }}>
             <span className="card-label" style={{ color: "#10b981", fontSize: "12px", letterSpacing: "2px" }}>✨ INNOCENT CLEARED</span>
-            <div style={{ fontSize: "72px", margin: "16px 0" }}>{innocentClearedNotice.targetIcon}</div>
+            <div style={{ margin: "16px 0", display: "flex", justifyContent: "center" }}>
+              <div style={{ width: "72px", height: "72px", borderRadius: "18px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <PlayerIcon icon={innocentClearedNotice.targetIcon} size={72} />
+              </div>
+            </div>
             <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#10b981", lineHeight: "1.4" }}>
               80퍼센트 이상이 <span style={{ color: "#ff4785", textDecoration: "underline" }}>[{innocentClearedNotice.targetName}]</span> 님의 무죄를 인정하여 2라운드가 진행됩니다!
             </h2>
@@ -2710,7 +2846,9 @@ export default function App() {
           animation: "popIn 0.3s ease",
           pointerEvents: "none",
         }}>
-          <span style={{ fontSize: "20px" }}>{playerLeftToast.icon}</span>
+          <div style={{ width: "24px", height: "24px", borderRadius: "6px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <PlayerIcon icon={playerLeftToast.icon} size={24} />
+          </div>
           <span><b>[{playerLeftToast.name}]</b> 님이 방을 나갔습니다.</span>
           <span style={{
             background: "#ff4785",

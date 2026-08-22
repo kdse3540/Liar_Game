@@ -312,6 +312,14 @@
 - **특이사항/의존성:** `npm run build` 검증 완료. `D:\Make_Game\Liar_Game\.agents\docs\2026-08-23_게임중_플레이어_및_방장_이탈_처리_규칙_SPEC.md` 기획서와 100% 일치.
 ---
 
+---
+## [2026-08-23 / 캐릭터 생성 화면 포트레이트 14종 이미지 교체 및 UI 반영]
+- **관련 파일 경로:** `public/portraits/`, `src/App.tsx` 내 `portraits`, `PlayerIcon`, `PlayerChip`, `src/components/AstraUI.tsx` 내 `Avatar`, `src/index.css` 내 `.portrait-grid`, `.portrait-choice`
+- **핵심 기능 및 역할:** 캐릭터 생성 화면(`.portrait-grid`)의 14개 이모지 포트레이트를 `Portrait/` 폴더 내의 고화질 일러스트 이미지 14종(`Portrait_01.png` ~ `Portrait_14.png`)으로 교체하고, 인게임/대기실/모달 아바타 전역에 이미지 렌더링 지원(`PlayerIcon` 컴포넌트)을 구현함.
+- **주요 함수/에셋 레퍼런스:** `portraits` 배열, `PlayerIcon` 컴포넌트, `Avatar` 컴포넌트, `.portrait-grid`, `.portrait-choice`, `.portrait-img` CSS.
+- **특이사항/의존성:** `Portrait/` 이미지들을 정적 에셋 경로 `public/portraits/`로 복사 동기화 완료. `npm run build` 검증 완료.
+---
+
 
 
 

@@ -24,10 +24,11 @@ export interface AvatarProps {
 }
 
 export function Avatar({
-  initials = "🦊",
+  initials = "/portraits/Portrait_01.png",
   size = "medium",
   shape = "square",
 }: AvatarProps) {
+  // 아바타 크기(width, height) 및 폰트 크기 설정
   const sizeStyle =
     size === "large"
       ? { width: "42px", height: "42px", fontSize: "24px" }
@@ -35,7 +36,13 @@ export function Avatar({
       ? { width: "24px", height: "24px", fontSize: "14px" }
       : { width: "32px", height: "32px", fontSize: "18px" };
 
+  // 원형(circle) 또는 모서리가 둥근 사각형(square) 테두리 반경 설정
   const borderRadius = shape === "circle" ? "50%" : "12px";
+
+  // 전달된 initials 값이 이미지 파일 경로(예: /portraits/Portrait_01.png)인지 확인
+  const isImage =
+    typeof initials === "string" &&
+    (initials.startsWith("/") || initials.startsWith("http") || initials.startsWith("data:"));
 
   return (
     <div
@@ -46,10 +53,24 @@ export function Avatar({
         borderRadius,
         background: "rgba(255, 255, 255, 0.4)",
         border: "1px solid rgba(0,0,0,0.1)",
+        overflow: "hidden", // 이미지가 모서리를 뚫고 나가지 않도록 숨김 처리
         ...sizeStyle,
       }}
     >
-      <span>{initials}</span>
+      {isImage ? (
+        <img
+          src={initials}
+          alt="캐릭터 포트레이트"
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+        />
+      ) : (
+        <span>{initials}</span>
+      )}
     </div>
   );
 }

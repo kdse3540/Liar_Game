@@ -123,7 +123,7 @@ io.on("connection", (socket) => {
     const hostPlayer = {
       socketId: socket.id,
       name: nickname || "방장감자",
-      icon: portrait || "🦊",
+      icon: portrait || "/portraits/Portrait_01.png",
       isHost: true,
       ready: true, // 방장은 기본 ready
       isDisconnected: false,
@@ -192,7 +192,7 @@ io.on("connection", (socket) => {
     const newPlayer = {
       socketId: socket.id,
       name: nickname || `참여자_${room.players.length + 1}`,
-      icon: portrait || "🐣",
+      icon: portrait || "/portraits/Portrait_01.png",
       isHost: false,
       ready: false,
       color: playerColor.color,
