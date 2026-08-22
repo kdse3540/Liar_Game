@@ -293,11 +293,23 @@
 - **핵심 기능 및 역할:** 라이어에게 "🚨 라이어" 문구 대신 동일 카테고리 내의 다른 제시어를 부여하는 `🤪 바보 라이어 모드`를 기본값(Default)으로 지정하고, 방장이 대기실에서 `😈 클래식 라이어 모드`를 선택할 수 있도록 옵션 확장. 게임 종료 시 진짜 제시어와 라이어가 받은 다른 제시어를 시각화하여 안내.
 - **주요 함수/에셋 레퍼런스:** `gameMode` ("fool" | "classic"), `getTwoRandomWords`, `start-game` 이벤트, `revealLiarResult`, `handleUpdateRoomSettings`
 ---
-## [2026-08-23 / 🔒 방 만들기 흐름 개편: 메인 화면 0307 관리자 인증 모달 팝업 후 캐릭터 선택 및 대기실 진입 매끄럽게 연결]
-- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` (`handleVerifyAdminPassword`, 메인 화면 `방 만들기` 버튼, `handleProceedToRoom`)
-- **핵심 기능 및 역할:** 메인 화면에서 [방 만들기] 클릭 시 곧바로 **`🔒 관리자 비밀번호 입력 (0307)`** 팝업 모달을 표출하고, 0307 인증이 성공하면 캐릭터 선택창으로 이동 후 [대기실 만들기 →] 클릭 시 막힘없이 시원하게 대기실(`screen = "room"`)로 즉시 진입하도록 흐름 수정.
-- **주요 함수/에셋 레퍼런스:** `handleVerifyAdminPassword`, `adminPassModalOpen`, `handleProceedToRoom`
-- **특이사항/의존성:** `npx tsc` 및 `npm run build` 검증 완료. GitHub main push (`9e6200c`) 완료.
+## [2026-08-23 / 🔑 무작위 6자리 방 코드(generateRoomCode) 자동 생성 및 초대 링크 디코딩 오류 수정]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\src\App.tsx` (`generateRoomCode`, `useEffect` 초대 링크 파라미터 정제, `handleProceedToRoom`, `handleVerifyAdminPassword`)
+- **핵심 기능 및 역할:**
+  1) 방장이 방을 생성할 때 기존 단일 고정 코드 대신 **독립적인 6자리 무작위 방 코드(예: `R8K3MX`)**를 자동 생성하여 각 방의 독립성과 보안 보장.
+  2) 초대 URL(`?room=방코드`)을 통해 들어올 때 파라미터의 특수문자/공백 정제(`replace(/[^a-zA-Z0-9]/g, "")`)를 수행하여 **"존재하지 않는 방 코드입니다."** 오진입 방지.
+- **주요 함수/에셋 레퍼런스:** `generateRoomCode`, `setTargetRoomCode`, `join-room`
+- **특이사항/의존성:** `npx tsc` 및 `npm run build` 검증 완료. GitHub main push (`a9e5c0a`) 완료.
+---
+## [2026-08-23 / 게임 중 플레이어 및 방장 이탈 처리 규칙 개편]
+- **관련 파일 경로:** `server/index.js` (`disconnect`, `checkAndProcessVoteResult`, `checkAndProcessFinalDecisionResult`, `checkAndProcessReVoteResult`, `join-room`), `src/App.tsx` (`host-left-game`, `not-enough-players`, `player-left`, `playerLeftToast`, `disconnectNoticeModal`)
+- **핵심 기능 및 역할:**
+  1) **방장 이탈 처리**: 방장이 퇴장 시 방을 승계하지 않고 방 자체를 폭파 및 게임을 완전히 종료하며, 남은 플레이어들에게 안내 모달 후 캐릭터 선택창으로 강제 퇴장(대기실 이동 차단).
+  2) **인원 '2명 이하' 대기실 복귀**: 게임 중 일반 플레이어 이탈로 남은 인원이 2명 이하(`<= 2`)가 되면 게임을 중단하고 대기실로 이동.
+  3) **투표 중 이탈 및 즉시 진행**: 투표 진행 중 플레이어가 이탈하면 대기하지 않고 즉시 제외 처리하며, 화면 상단에 이탈 알림 토스트를 띄우고 남은 인원 기준 투표 완료 시 지연 없이 다음 단계로 진행.
+  4) **재접속 대기 제거**: 이탈자는 즉시 영구 제외되며 게임 진행 중인 방으로의 재입장 차단.
+- **주요 함수/에셋 레퍼런스:** `disconnect` 소켓 핸들러, `host-left-game`, `not-enough-players`, `player-left`, `checkAndProcessVoteResult`, `playerLeftToast` state
+- **특이사항/의존성:** `npm run build` 검증 완료. `D:\Make_Game\Liar_Game\.agents\docs\2026-08-23_게임중_플레이어_및_방장_이탈_처리_규칙_SPEC.md` 기획서와 100% 일치.
 ---
 
 

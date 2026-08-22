@@ -182,50 +182,6 @@ io.on("connection", (socket) => {
       return socket.emit("room-error", { message: "방 정원이 가득 찼습니다." });
     }
 
-    // 💡 이탈한 참가자의 재접속 처리 (동일 닉네임 및 이탈 상태 감지)
-    const targetName = nickname || `참여자_${room.players.length + 1}`;
-    const disconnectedP = room.players.find((p) => p.name === targetName && p.isDisconnected);
-
-    if (disconnectedP) {
-      disconnectedP.socketId = socket.id;
-      disconnectedP.isDisconnected = false;
-      socket.join(code);
-      socket.data.roomCode = code;
-      socket.data.nickname = disconnectedP.name;
-
-      console.log(`🔄 [재접속 복구] 방: ${code}, 참가자: ${disconnectedP.name}`);
-
-      socket.emit("room-joined", {
-        success: true,
-        room,
-        myPlayer: disconnectedP,
-      });
-
-      // 만약 게임 중이었다면 이전 비밀 제시어 및 진행 상태 즉시 복구 패킷 전달
-      if (room.gameState === "playing") {
-        const isLiar = room.liarSocketIds.includes(socket.id) || room.liarSocketIds.includes(disconnectedP.socketId);
-        const word = isLiar
-          ? (room.gameMode === "fool" ? room.currentWordInfo?.foolWord : "🚨 라이어")
-          : room.currentWordInfo?.word;
-
-        socket.emit("game-reconnected", {
-          room,
-          category: room.currentWordInfo?.category,
-          word,
-          realWord: room.currentWordInfo?.word,
-          foolWord: room.currentWordInfo?.foolWord,
-          isLiar,
-          gameMode: room.gameMode || "fool",
-          gamePhase: room.phase,
-          activeSpeakerSocketId: room.activeSpeakerSocketId,
-          myInventory: disconnectedP.inventory || { tomato: 2, egg: 2, water: 2, banana: 2 },
-        });
-      }
-
-      io.to(code).emit("room-updated", { room, categories: getCategories() });
-      return;
-    }
-
     if (room.gameState === "playing") {
       return socket.emit("room-error", { message: "이미 게임이 진행 중인 방입니다." });
     }
@@ -550,16 +506,15 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 5-3. 투표 수집 및 결과 집계 (submit-vote)
   // ------------------------------------------------------------------
-  socket.on("submit-vote", ({ targetSocketId }) => {
-    const code = socket.data.roomCode;
+  /**
+   * 1차 투표 집계 및 다음 단계 진행 검사 헬퍼 함수
+   */
+  function checkAndProcessVoteResult(code) {
     const room = rooms[code];
-    if (!room) return;
-
-    if (!room.votes) room.votes = {};
-    room.votes[socket.id] = targetSocketId;
+    if (!room || room.phase !== "vote") return;
 
     const activePlayers = room.players.filter(p => !(room.eliminatedSocketIds || []).includes(p.socketId));
-    const votedCount = Object.keys(room.votes).length;
+    const votedCount = Object.keys(room.votes || {}).length;
 
     // 실시간 투표 진행 현황 알림
     io.to(code).emit("vote-progress", {
@@ -568,7 +523,7 @@ io.on("connection", (socket) => {
     });
 
     // 전원 투표 완료 시 결과 집계 브로드캐스트
-    if (votedCount >= activePlayers.length) {
+    if (votedCount >= activePlayers.length && activePlayers.length > 0) {
       const tally = {}; // targetSocketId -> count (득표 수 집계)
       const voteDetails = []; // [{ voterName, targetName }] (상세 표 목록)
 
@@ -594,7 +549,8 @@ io.on("connection", (socket) => {
       });
 
       // ─── 투표 결과 분석: 최다 득표자 / 동률 판별 ───
-      const maxVotes = Math.max(...Object.values(tally));
+      const voteCounts = Object.values(tally);
+      const maxVotes = voteCounts.length > 0 ? Math.max(...voteCounts) : 0;
       const topVotedIds = Object.keys(tally).filter(id => tally[id] === maxVotes);
 
       // 방에 투표 분석 결과 저장 (프론트에서 참조)
@@ -629,6 +585,17 @@ io.on("connection", (socket) => {
         startPostVoteFlow(code);
       }, 3000);
     }
+  }
+
+  socket.on("submit-vote", ({ targetSocketId }) => {
+    const code = socket.data.roomCode;
+    const room = rooms[code];
+    if (!room) return;
+
+    if (!room.votes) room.votes = {};
+    room.votes[socket.id] = targetSocketId;
+
+    checkAndProcessVoteResult(code);
   });
 
   // ------------------------------------------------------------------
@@ -798,20 +765,16 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 5-3e. 최종 결정 투표 제출 (submit-final-decision)
   // ------------------------------------------------------------------
-  socket.on("submit-final-decision", ({ decision }) => {
-    const code = socket.data.roomCode;
+  function checkAndProcessFinalDecisionResult(code) {
     const room = rooms[code];
     if (!room || room.phase !== "final-decision") return;
-
-    if (!room.finalDecisionVotes) room.finalDecisionVotes = {};
-    room.finalDecisionVotes[socket.id] = decision; // "guilty" 또는 "innocent"
 
     // 투표 가능 인원 = 활성 플레이어 중 최다 득표자 제외
     const activePlayers = room.players.filter(p =>
       !(room.eliminatedSocketIds || []).includes(p.socketId) &&
       p.socketId !== room.finalDecisionTarget
     );
-    const votedCount = Object.keys(room.finalDecisionVotes).length;
+    const votedCount = Object.keys(room.finalDecisionVotes || {}).length;
 
     // 실시간 투표 진행 현황 알림
     io.to(code).emit("vote-progress", {
@@ -820,7 +783,7 @@ io.on("connection", (socket) => {
     });
 
     // 전원 투표 완료 시 80% 판정
-    if (votedCount >= activePlayers.length) {
+    if (votedCount >= activePlayers.length && activePlayers.length > 0) {
       const totalVoters = activePlayers.length;
       const innocentCount = Object.values(room.finalDecisionVotes).filter(v => v === "innocent").length;
       const innocentPercent = totalVoters > 0 ? (innocentCount / totalVoters) * 100 : 0;
@@ -870,6 +833,17 @@ io.on("connection", (socket) => {
       // 투표 데이터 초기화
       room.finalDecisionVotes = {};
     }
+  }
+
+  socket.on("submit-final-decision", ({ decision }) => {
+    const code = socket.data.roomCode;
+    const room = rooms[code];
+    if (!room || room.phase !== "final-decision") return;
+
+    if (!room.finalDecisionVotes) room.finalDecisionVotes = {};
+    room.finalDecisionVotes[socket.id] = decision; // "guilty" 또는 "innocent"
+
+    checkAndProcessFinalDecisionResult(code);
   });
 
   // ------------------------------------------------------------------
@@ -962,13 +936,9 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 5-3g. 재투표 제출 (submit-re-vote)
   // ------------------------------------------------------------------
-  socket.on("submit-re-vote", ({ targetSocketId }) => {
-    const code = socket.data.roomCode;
+  function checkAndProcessReVoteResult(code) {
     const room = rooms[code];
     if (!room || room.phase !== "re-vote") return;
-
-    if (!room.reVotes) room.reVotes = {};
-    room.reVotes[socket.id] = targetSocketId;
 
     // 투표 가능 인원 = 활성 플레이어 중 공동 최다 득표자들 제외
     const candidates = room.reVoteCandidates || [];
@@ -976,7 +946,7 @@ io.on("connection", (socket) => {
       !(room.eliminatedSocketIds || []).includes(p.socketId) &&
       !candidates.includes(p.socketId)
     );
-    const votedCount = Object.keys(room.reVotes).length;
+    const votedCount = Object.keys(room.reVotes || {}).length;
 
     // 실시간 투표 진행 현황 알림
     io.to(code).emit("vote-progress", {
@@ -985,7 +955,7 @@ io.on("connection", (socket) => {
     });
 
     // 전원 투표 완료 시 결과 분석
-    if (votedCount >= activePlayers.length) {
+    if (votedCount >= activePlayers.length && activePlayers.length > 0) {
       const tally = {};
       Object.values(room.reVotes).forEach(targetId => {
         tally[targetId] = (tally[targetId] || 0) + 1;
@@ -1035,6 +1005,17 @@ io.on("connection", (socket) => {
         }, 3000);
       }
     }
+  }
+
+  socket.on("submit-re-vote", ({ targetSocketId }) => {
+    const code = socket.data.roomCode;
+    const room = rooms[code];
+    if (!room || room.phase !== "re-vote") return;
+
+    if (!room.reVotes) room.reVotes = {};
+    room.reVotes[socket.id] = targetSocketId;
+
+    checkAndProcessReVoteResult(code);
   });
 
   // ------------------------------------------------------------------
@@ -1287,26 +1268,162 @@ io.on("connection", (socket) => {
     if (!code || !rooms[code]) return;
 
     const room = rooms[code];
+    const leavingPlayer = room.players.find((p) => p.socketId === socket.id);
+    if (!leavingPlayer) return;
+
+    console.log(`🔴 [접속 종료 감지] 방: ${code}, 퇴장자: ${leavingPlayer.name} (${leavingPlayer.isHost ? "👑 방장" : "참여자"}), 상태: ${room.gameState}`);
+
+    // ─────────────────────────────────────────────────────────────
+    // 1) 방장이 이탈한 경우 ➔ 방 폭파 및 게임 종료 (캐릭터 선택창 이동)
+    // ─────────────────────────────────────────────────────────────
+    if (leavingPlayer.isHost) {
+      console.log(`🚨 [방장 이탈] 방 ${code} 폭파 및 전체 게임 종료`);
+
+      // 진행 중인 모든 타이머 해제
+      if (roomTimers[code]) {
+        clearTimeout(roomTimers[code]);
+        delete roomTimers[code];
+      }
+
+      // 남은 모든 방원에게 방장 이탈 알림 브로드캐스트
+      io.to(code).emit("host-left-game", {
+        message: "방장이 이탈하여 게임이 종료됩니다.",
+      });
+
+      // 방 메모리 데이터 완전 삭제
+      delete rooms[code];
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 2) 일반 플레이어가 이탈한 경우 ➔ 즉시 방에서 영구 제거
+    // ─────────────────────────────────────────────────────────────
     room.players = room.players.filter((p) => p.socketId !== socket.id);
 
-    console.log(`🔴 [퇴장] 방: ${code}, 남은 인원: ${room.players.length}명`);
-
-    // 방이 완전히 비었으면 방 삭제
+    // 방에 아무도 없으면 방 삭제
     if (room.players.length === 0) {
       if (roomTimers[code]) {
         clearTimeout(roomTimers[code]);
         delete roomTimers[code];
       }
       delete rooms[code];
-      console.log(`🗑️ [방 삭제] 코드: ${code}`);
-    } else {
-      // 퇴장한 사람이 방장이었다면 첫 번째 사람을 새로운 방장으로 승격
-      if (!room.players.some((p) => p.isHost)) {
-        room.players[0].isHost = true;
-        room.players[0].ready = true;
-      }
-      io.to(code).emit("room-updated", { room });
+      console.log(`🗑️ [방 삭제 - 인원 0명] 코드: ${code}`);
+      return;
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 3) 게임 진행 중(playing) 이탈 처리
+    // ─────────────────────────────────────────────────────────────
+    if (room.gameState === "playing") {
+      // [CASE 3-A] 남은 인원이 '2명 이하'로 줄어든 경우 ➔ 게임 중단 및 대기실 복귀
+      if (room.players.length <= 2) {
+        console.log(`⚠️ [인원 부족 (2명 이하)] 방: ${code}, 남은 인원: ${room.players.length}명 ➔ 대기실 복귀`);
+
+        // 모든 진행 타이머 클리어
+        if (roomTimers[code]) {
+          clearTimeout(roomTimers[code]);
+          delete roomTimers[code];
+        }
+
+        // 방 상태를 대기실 모드로 리셋
+        room.gameState = "waiting";
+        room.phase = "waiting";
+        room.votes = {};
+        room.finalDecisionVotes = {};
+        room.reVotes = {};
+
+        // 모든 방원에게 인원 부족 안내 브로드캐스트
+        io.to(code).emit("not-enough-players", {
+          message: "인원이 2명 이하로 줄어들어 게임이 종료되어 대기실로 이동합니다.",
+          remainingCount: room.players.length,
+        });
+
+        // 갱신된 방 정보 전송
+        io.to(code).emit("room-updated", { room, categories: getCategories() });
+        return;
+      }
+
+      // [CASE 3-B] 남은 인원이 3명 이상인 경우 ➔ 알림 전송 후 지체 없이 계속 진행
+      console.log(`👤 [게임 중 일반 플레이어 퇴장] 방: ${code}, ${leavingPlayer.name} 퇴장, 남은 인원: ${room.players.length}명`);
+
+      // 전원에게 이탈 알림 브로드캐스트
+      io.to(code).emit("player-left", {
+        leftPlayerName: leavingPlayer.name,
+        leftPlayerIcon: leavingPlayer.icon,
+        remainingCount: room.players.length,
+      });
+
+      // 진행 중인 페이즈별 즉시 보정 처리
+      if (room.phase === "hint-turn") {
+        // 발언 중이던 유저가 나간 경우 다음 사람으로 즉각 턴 전환
+        if (room.activeSpeakerSocketId === socket.id) {
+          room.turnIndex = room.turnIndex % room.players.length;
+          room.activeSpeakerSocketId = room.players[room.turnIndex]?.socketId || "";
+
+          console.log(`🔄 [발언자 퇴장으로 턴 전환] 다음 발언자: ${room.players[room.turnIndex]?.name}`);
+
+          io.to(code).emit("turn-changed", {
+            turnIndex: room.turnIndex,
+            activeSpeakerSocketId: room.activeSpeakerSocketId,
+            activeSpeakerName: room.players[room.turnIndex]?.name,
+            hintTime: getEffectiveSec(room, room.hintTime || 20),
+          });
+        }
+      } else if (room.phase === "vote") {
+        // 투표 단계에서 이탈 시 기투표 제거 및 남은 인원 기준 즉시 재계산/마감
+        if (room.votes) {
+          delete room.votes[socket.id];
+        }
+        checkAndProcessVoteResult(code);
+      } else if (room.phase === "final-decision") {
+        // 최종 결정 투표 단계에서 이탈 시
+        if (room.finalDecisionTarget === socket.id) {
+          // 최다 득표 대상자가 나간 경우 ➔ 즉시 2라운드로 넘김
+          console.log(`⚖️ [최종결정 대상자 이탈] 2라운드로 즉시 전환`);
+          if (roomTimers[code]) clearTimeout(roomTimers[code]);
+          startRound2(code);
+        } else {
+          if (room.finalDecisionVotes) {
+            delete room.finalDecisionVotes[socket.id];
+          }
+          checkAndProcessFinalDecisionResult(code);
+        }
+      } else if (room.phase === "re-vote") {
+        // 재투표 단계에서 이탈 시
+        if (room.reVotes) {
+          delete room.reVotes[socket.id];
+        }
+        checkAndProcessReVoteResult(code);
+      } else if (room.phase === "final-defense" || room.phase === "self-defense") {
+        // 최후변론 또는 자기변호 중이던 유저가 나간 경우 다음 변호/자유토론으로 진행
+        if (room.phase === "final-defense") {
+          if (roomTimers[code]) clearTimeout(roomTimers[code]);
+          startPostVoteFreeTalk(code, room.topVotedSocketIds || []);
+        } else if (room.phase === "self-defense") {
+          if (room.selfDefenseQueue) {
+            room.selfDefenseQueue = room.selfDefenseQueue.filter(id => id !== socket.id);
+          }
+          if (roomTimers[code]) clearTimeout(roomTimers[code]);
+          startNextSelfDefense(code);
+        }
+      }
+
+      io.to(code).emit("room-updated", { room, categories: getCategories() });
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 4) 대기실(waiting) 상태에서 이탈 처리
+    // ─────────────────────────────────────────────────────────────
+    console.log(`👤 [대기실 플레이어 퇴장] 방: ${code}, ${leavingPlayer.name}, 남은 인원: ${room.players.length}명`);
+
+    io.to(code).emit("player-left", {
+      leftPlayerName: leavingPlayer.name,
+      leftPlayerIcon: leavingPlayer.icon,
+      remainingCount: room.players.length,
+    });
+
+    io.to(code).emit("room-updated", { room, categories: getCategories() });
   });
 });
 

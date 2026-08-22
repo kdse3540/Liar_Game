@@ -203,6 +203,7 @@ export default function App() {
   const [adminPassInput, setAdminPassInput] = useState("");
   const [adminPassError, setAdminPassError] = useState("");
   const [disconnectNoticeModal, setDisconnectNoticeModal] = useState<{ type: "host" | "liar" | "not-enough"; message: string } | null>(null); // 이탈 전면 알림 모달
+  const [playerLeftToast, setPlayerLeftToast] = useState<{ name: string; icon: string; count: number } | null>(null); // 게임 중 일반 플레이어 이탈 상단 토스트 알림
   const [selectedCategory, setSelectedCategory] = useState("ALL"); // 주제 카테고리 (ALL: 전체 무작위)
   const [categories, setCategories] = useState<string[]>(["ALL", "장소 / 놀거리", "음식 / 디저트", "직업", "동식물", "전자제품"]);
   const [fastTestMode, setFastTestMode] = useState<boolean>(false); // 테스트용 초스피드 모드 (모든 타이머 1초)
@@ -399,44 +400,56 @@ export default function App() {
       setPlayerHints(hints || {});
     });
 
-    // 3-2) 이탈 이벤트 리스너 (방장 이탈, 라이어 이탈, 인원 부족)
+    // 3-2) 이탈 이벤트 리스너 (방장 이탈, 인원 부족 2명 이하, 일반 플레이어 이탈)
+    // 👑 방장이 이탈한 경우 ➔ 방 폭파 및 시스템 알림 모달 후 캐릭터 선택창으로 강제 이동
     socket.on("host-left-game", ({ message }) => {
-      setDisconnectNoticeModal({ type: "host", message });
-      setTimeout(() => {
-        setDisconnectNoticeModal(null);
-        setScreen("character");
-      }, 3200);
-    });
+      setDisconnectNoticeModal({
+        type: "host",
+        message: message || "방장이 이탈하여 게임이 종료됩니다.",
+      });
 
-    socket.on("liar-left-game", ({ message }) => {
-      setDisconnectNoticeModal({ type: "liar", message });
+      // 방 세션 및 데이터 즉시 초기화 (방이 폭파되었으므로 대기실 복귀 불가)
       setTimeout(() => {
         setDisconnectNoticeModal(null);
+        setRoomCode("");
+        setOnlinePlayers(defaultPlayers);
+        setMyPlayerInfo(null);
         setGamePhase("waiting");
-        setScreen("room");
-      }, 3200);
+        setScreen("character"); // 캐릭터 선택창으로 강제 이동
+      }, 3000);
     });
 
+    // ⚠️ 인원이 2명 이하로 줄어든 경우 ➔ 대기실로 복귀
     socket.on("not-enough-players", ({ message }) => {
-      setDisconnectNoticeModal({ type: "not-enough", message });
+      setDisconnectNoticeModal({
+        type: "not-enough",
+        message: message || "인원이 2명 이하로 줄어들어 게임이 종료되어 대기실로 이동합니다.",
+      });
       setTimeout(() => {
         setDisconnectNoticeModal(null);
         setGamePhase("waiting");
-        setScreen("room");
-      }, 3200);
+        setScreen("room"); // 대기실로 복귀
+      }, 2800);
     });
 
-    // 3-3) 재접속 복구 세션 수신 (game-reconnected)
-    socket.on("game-reconnected", ({ room, category, word, isLiar, gameMode, gamePhase, activeSpeakerSocketId, myInventory }) => {
-      setOnlinePlayers(room.players);
-      setSecretCategory(category);
-      setSecretWord(word);
-      setIsLiar(isLiar);
-      setGameMode(gameMode);
-      setGamePhase(gamePhase || "hint-turn");
-      setScreen("play");
-      if (activeSpeakerSocketId) setTurnSpeakerSocketId(activeSpeakerSocketId);
-      if (myInventory) setMyInventory(myInventory);
+    // 👤 게임 중 또는 대기실에서 일반 플레이어가 이탈한 경우 ➔ 화면 상단 토스트 알림
+    socket.on("player-left", ({ leftPlayerName, leftPlayerIcon, remainingCount }) => {
+      setPlayerLeftToast({
+        name: leftPlayerName || "참여자",
+        icon: leftPlayerIcon || "👤",
+        count: remainingCount,
+      });
+
+      // 3초 후 토스트 자동 소멸
+      setTimeout(() => {
+        setPlayerLeftToast((prev) => (prev?.name === leftPlayerName ? null : prev));
+      }, 3000);
+
+      // 채팅창에 시스템 알림 메시지 기록
+      setChatLog((logs) => [
+        ...logs,
+        { text: `📢 [시스템] [${leftPlayerName || "참여자"}] 님이 퇴장하였습니다. (남은 인원: ${remainingCount}명)`, time: "방금" },
+      ]);
     });
 
     // 4) 실시간 채팅 수신 (각 유저별 독립 3초 말풍선 타이머 제어 - 다른 유저 말풍선 지워짐 100% 방지!)
@@ -2675,25 +2688,91 @@ export default function App() {
         </div>
       )}
 
-      {/* ── 🚨 플레이어 이탈 (방장 이탈 / 라이어 이탈 / 인원 부족) 전면 모달 (모든 screen에서 표출 가능) ── */}
+      {/* ── 👤 게임 중/투표 중 일반 플레이어 이탈 상단 플로팅 토스트 배너 ── */}
+      {playerLeftToast && (
+        <div style={{
+          position: "fixed",
+          top: "24px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 999999,
+          background: "linear-gradient(135deg, rgba(30, 27, 75, 0.95), rgba(76, 29, 149, 0.95))",
+          color: "#fff",
+          padding: "12px 24px",
+          borderRadius: "30px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.4), 0 0 15px rgba(255, 71, 133, 0.5)",
+          border: "2px solid #ff4785",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          fontSize: "15px",
+          fontWeight: "bold",
+          animation: "popIn 0.3s ease",
+          pointerEvents: "none",
+        }}>
+          <span style={{ fontSize: "20px" }}>{playerLeftToast.icon}</span>
+          <span><b>[{playerLeftToast.name}]</b> 님이 방을 나갔습니다.</span>
+          <span style={{
+            background: "#ff4785",
+            color: "#fff",
+            fontSize: "12px",
+            padding: "2px 8px",
+            borderRadius: "12px",
+            marginLeft: "4px"
+          }}>
+            남은 인원: {playerLeftToast.count}명
+          </span>
+        </div>
+      )}
+
+      {/* ── 🚨 플레이어 이탈 (방장 이탈 / 인원 부족) 전면 모달 (모든 screen에서 표출 가능) ── */}
       {disconnectNoticeModal && (
         <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(16px)", backgroundColor: "rgba(0,0,0,0.85)" }}>
           <div className="nickname-modal" style={{
             maxWidth: "480px", width: "90%", textAlign: "center",
             border: `3px solid ${disconnectNoticeModal.type === "host" ? "#ff4785" : "#ff6f3c"}`,
-            boxShadow: "0 0 45px rgba(255,71,133,0.6)",
+            boxShadow: `0 0 45px ${disconnectNoticeModal.type === "host" ? "rgba(255,71,133,0.6)" : "rgba(255,111,60,0.6)"}`,
             animation: "popIn 0.3s ease",
           }}>
-            <span className="card-label" style={{ color: "#ff4785" }}>NOTICE</span>
+            <span className="card-label" style={{ color: disconnectNoticeModal.type === "host" ? "#ff4785" : "#ff6f3c" }}>
+              {disconnectNoticeModal.type === "host" ? "🚨 GAME TERMINATED" : "⚠️ NOT ENOUGH PLAYERS"}
+            </span>
             <div style={{ fontSize: "64px", margin: "14px 0" }}>
-              {disconnectNoticeModal.type === "host" ? "👑" : disconnectNoticeModal.type === "liar" ? "🚨" : "📢"}
+              {disconnectNoticeModal.type === "host" ? "👑" : "📢"}
             </div>
             <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#2b2b2b", lineHeight: "1.4" }}>
               {disconnectNoticeModal.message}
             </h2>
-            <p style={{ fontSize: "14px", color: "#666" }}>
-              잠시 후 3초 뒤 자동으로 화면이 이동합니다...
+            <p style={{ fontSize: "14px", color: "#666", marginBottom: "18px" }}>
+              {disconnectNoticeModal.type === "host"
+                ? "방장이 퇴장하여 방이 삭제되었습니다. 캐릭터 선택창으로 이동합니다."
+                : "남은 인원이 2명 이하가 되어 더 이상 게임을 진행할 수 없습니다. 대기실로 이동합니다."}
             </p>
+            <button
+              type="button"
+              className="primary-button"
+              style={{
+                width: "100%",
+                background: disconnectNoticeModal.type === "host" ? "#ff4785" : "#635bff",
+                borderColor: disconnectNoticeModal.type === "host" ? "#e02667" : "#4f46e5",
+              }}
+              onClick={() => {
+                if (disconnectNoticeModal.type === "host") {
+                  setDisconnectNoticeModal(null);
+                  setRoomCode("");
+                  setOnlinePlayers(defaultPlayers);
+                  setMyPlayerInfo(null);
+                  setGamePhase("waiting");
+                  setScreen("character");
+                } else {
+                  setDisconnectNoticeModal(null);
+                  setGamePhase("waiting");
+                  setScreen("room");
+                }
+              }}
+            >
+              {disconnectNoticeModal.type === "host" ? "캐릭터 선택창으로 이동 ➔" : "대기실로 이동 ➔"}
+            </button>
           </div>
         </div>
       )}
