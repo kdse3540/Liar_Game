@@ -956,45 +956,38 @@ export default function App() {
         portrait: myIcon,
       });
     } else {
-      // 새 방을 만드는 방장 ➔ 🔒 관리자 방 생성 비밀번호(0307) 확인 모달 표출
-      setAdminPassError("");
-      setAdminPassInput("");
-      setAdminPassModalOpen(true);
+      // 새 방을 만드는 방장 -> 0307 인증 완료 상태에서 create-room 발송
+      socket.emit("create-room", {
+        roomCode: roomCode || "MANGO7",
+        roomTitle,
+        roomPassword,
+        adminPassword: "0307",
+        maxPlayers,
+        liarCount,
+        gameMode,
+        hintTime,
+        discussionTime,
+        defenseTime,
+        reconnectWaitTime,
+        nickname: currentNickname,
+        portrait: myIcon,
+      });
     }
   };
 
-  // [관리자 비밀번호 0307 확인 후 방 생성 제출 함수]
-  const handleCreateRoomWithAdminPassword = () => {
+  // [관리자 비밀번호 0307 확인 후 캐릭터 생성 창 이동 함수]
+  const handleVerifyAdminPassword = () => {
     if (adminPassInput.trim() !== "0307") {
-      setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다. (테스트 관리자 비밀번호: 0307)");
+      setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다. (테스트 비밀번호: 0307)");
       return;
     }
 
-    const currentNickname = nickname.trim() || defaultNickname;
-    const myIcon = portraits[selectedPortrait] || "🦊";
-
-    if (!socket.connected) {
-      socket.connect();
-    }
-
-    socket.emit("create-room", {
-      roomCode: roomCode || "MANGO7",
-      roomTitle,
-      roomPassword,
-      adminPassword: "0307",
-      maxPlayers,
-      liarCount,
-      gameMode,
-      hintTime,
-      discussionTime,
-      defenseTime,
-      reconnectWaitTime,
-      nickname: currentNickname,
-      portrait: myIcon,
-    });
-
     setAdminPassModalOpen(false);
     setAdminPassError("");
+    setAdminPassInput("");
+    setTargetRoomCode("");
+    setJoinInputCode("");
+    setScreen("character"); // 0307 성공 시 캐릭터 선택 화면으로 이동
   };
 
   // [방 참여 소켓 전송 함수]
@@ -1121,7 +1114,16 @@ export default function App() {
           <h1>누가 진짜<br /><strong>거짓말장인</strong>일까?</h1>
           <p className="hero-description">모두가 같은 단어를 아는 척해요.<br />단 한 명, <b>라이어</b>만 빼고요.</p>
           <div className="home-actions" style={{ flexDirection: "column", gap: "10px", alignItems: "flex-start" }}>
-            <button className="primary-button" onClick={() => { setTargetRoomCode(""); setJoinInputCode(""); setScreen("character"); }}>방 만들기 <span>→</span></button>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setAdminPassInput("");
+                setAdminPassError("");
+                setAdminPassModalOpen(true);
+              }}
+            >
+              방 만들기 <span>→</span>
+            </button>
             <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
               <input
                 style={{ padding: "10px 14px", borderRadius: "10px", border: "2px solid #20212b", fontWeight: "bold", textTransform: "uppercase" }}
@@ -2007,8 +2009,8 @@ export default function App() {
                 type="password"
                 value={adminPassInput}
                 onChange={(e) => setAdminPassInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateRoomWithAdminPassword(); }}
-                placeholder="비밀번호 입력"
+                onKeyDown={(e) => { if (e.key === "Enter") handleVerifyAdminPassword(); }}
+                placeholder="비밀번호 입력 (0307)"
                 style={{
                   width: "100%", padding: "12px 16px", borderRadius: "12px", border: "2px solid #7652dd",
                   fontSize: "16px", textAlign: "center", marginBottom: "10px"
@@ -2023,8 +2025,8 @@ export default function App() {
               )}
 
               <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-                <button className="primary-button" style={{ flex: 1 }} onClick={handleCreateRoomWithAdminPassword}>
-                  방 생성하기 ➔
+                <button className="primary-button" style={{ flex: 1 }} onClick={handleVerifyAdminPassword}>
+                  인증 완료 (캐릭터 선택으로) ➔
                 </button>
                 <button
                   style={{ padding: "12px 16px", borderRadius: "12px", border: "1px solid #ccc", background: "#f0f0f0", cursor: "pointer", fontWeight: "bold" }}

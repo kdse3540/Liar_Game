@@ -292,7 +292,17 @@
 - **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` (`start-game`, `update-room-settings`, `revealLiarResult`), `d:\Make_Game\Liar_Game\src\App.tsx` (`gameMode` state, 대기실 `ROUND SETTINGS` 패널 UI, `gameResultData` 제시어 표출)
 - **핵심 기능 및 역할:** 라이어에게 "🚨 라이어" 문구 대신 동일 카테고리 내의 다른 제시어를 부여하는 `🤪 바보 라이어 모드`를 기본값(Default)으로 지정하고, 방장이 대기실에서 `😈 클래식 라이어 모드`를 선택할 수 있도록 옵션 확장. 게임 종료 시 진짜 제시어와 라이어가 받은 다른 제시어를 시각화하여 안내.
 - **주요 함수/에셋 레퍼런스:** `gameMode` ("fool" | "classic"), `getTwoRandomWords`, `start-game` 이벤트, `revealLiarResult`, `handleUpdateRoomSettings`
-- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료. `2026-08-23_라이어_다른제시어_제공_기획_SPEC.md` 반영 완료.
+---
+## [2026-08-23 / 🔌 플레이어 이탈 처리 분기, 이탈자 대기시간 설정 및 관리자 방 생성 제한(0307) 구현]
+- **관련 파일 경로:** `d:\Make_Game\Liar_Game\server\index.js` (`disconnect`, `create-room`, `join-room`, `update-room-settings`), `d:\Make_Game\Liar_Game\src\App.tsx` (`reconnectWaitTime`, `adminPassModalOpen`, `disconnectNoticeModal`, `PlayerChip`)
+- **핵심 기능 및 역할:** 
+  1) 👑 방장 이탈 시 방 완전 해체 및 전원 캐릭터 선택창 이동.
+  2) 😈 라이어 이탈 시 "🚨 라이어가 이탈하였습니다." 안내 후 대기실 이동.
+  3) 👥 남은 인원 < 2명 시 "📢 인원 부족" 안내 후 대기실 이동.
+  4) 🏃 시민 이탈 시 "🔴 이탈됨" 뱃지 표기 및 방장 설정 대기시간(30~120초) 내 재접속 시 이전 라이어 게임 세션 복구 참전.
+  5) 🔒 방 만들기 시 테스트 버전 관리자 비밀번호(`0307`) 인증 모달 도입.
+- **주요 함수/에셋 레퍼런스:** `reconnectWaitTime`, `isDisconnected`, `host-left-game`, `liar-left-game`, `not-enough-players`, `game-reconnected`, `handleCreateRoomWithAdminPassword`
+- **특이사항/의존성:** `node --check` 및 `npm run build` 검증 완료. GitHub main push (`00ff442`) 완료.
 ---
 
 
