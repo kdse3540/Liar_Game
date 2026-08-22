@@ -328,6 +328,14 @@
 - **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-23 / 대기실(ROOM) 플레이어 칩 포트레이트 크기 대폭 확대 (64px) 및 UI 최적화]
+- **관련 파일 경로:** `src/index.css` 내 `.players-grid .avatar`, `.player-chip`, `.empty-seat`
+- **핵심 기능 및 역할:** 대기실의 플레이어 칩 내 캐릭터 일러스트가 시원하고 선명하게 보이도록 포트레이트 아바타 크기를 기존 38px에서 **64px**로 약 1.7배 대폭 확대하고, 모서리 반경(`18px`), 빈 좌석(`empty-seat`) 높이 밸런스 및 닉네임 줄바꿈을 깔끔하게 조율함.
+- **주요 함수/에셋 레퍼런스:** `.players-grid .avatar`, `.player-chip`, `.empty-seat` CSS 클래스.
+- **특이사항/의존성:** `npm run build` 검증 완료.
+---
+
 
 
 
