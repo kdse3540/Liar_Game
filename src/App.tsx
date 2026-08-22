@@ -80,7 +80,7 @@ function PlayerChip({
   onEdit,
   onClick,
 }: {
-  player: { socketId?: string; name: string; icon: string; ready?: boolean; isHost?: boolean; color: string; softColor: string };
+  player: { socketId?: string; name: string; icon: string; ready?: boolean; isHost?: boolean; isDisconnected?: boolean; color: string; softColor: string };
   compact?: boolean;
   displayName?: string;
   displayIcon?: string;
@@ -90,6 +90,7 @@ function PlayerChip({
   onClick?: () => void;
 }) {
   const icon = displayIcon ?? player.icon;
+  const isDisconnected = Boolean(player.isDisconnected);
   return (
     <div
       className={`player-chip ${compact ? "compact" : ""}`}
@@ -97,9 +98,28 @@ function PlayerChip({
       style={{
         ...(compact ? {} : { backgroundColor: player.softColor, borderColor: player.color }),
         cursor: onClick ? "pointer" : "default",
+        filter: isDisconnected ? "grayscale(80%) opacity(0.55)" : "none",
+        position: "relative",
       }}
       title={onClick ? "클릭 시 이 유저의 프로필 전적 보기" : undefined}
     >
+      {isDisconnected && (
+        <span style={{
+          position: "absolute",
+          top: "-8px",
+          right: "-8px",
+          background: "#ff4785",
+          color: "#fff",
+          fontSize: "10px",
+          fontWeight: "bold",
+          padding: "2px 6px",
+          borderRadius: "8px",
+          zIndex: 10,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+        }}>
+          🔴 이탈됨
+        </span>
+      )}
       {speech && (
         <div
           className={`player-speech ${isActiveSpeaker ? "active-speaker" : ""}`}
@@ -112,10 +132,9 @@ function PlayerChip({
         {icon}
       </div>
       <span>{displayName ?? player.name}</span>
-      {/* 방장은 "👑 HOST", 일반 유저는 Ready 상태에 따라 "READY" 또는 "..."로 표시 */}
       {!compact && (
-        <em className={player.isHost ? "host" : player.ready ? "ready" : "waiting"}>
-          {player.isHost ? "👑 HOST" : player.ready ? "READY" : "..."}
+        <em className={isDisconnected ? "waiting" : player.isHost ? "host" : player.ready ? "ready" : "waiting"}>
+          {isDisconnected ? "🔴 이탈" : player.isHost ? "👑 HOST" : player.ready ? "READY" : "..."}
         </em>
       )}
       {onEdit && <button className="nickname-edit" onClick={(e) => { e.stopPropagation(); onEdit(); }}>닉네임 편집</button>}
@@ -169,6 +188,11 @@ export default function App() {
   const [defenseTime, setDefenseTime] = useState("45");
   const [liarCount, setLiarCount] = useState("1");
   const [gameMode, setGameMode] = useState<"fool" | "classic">("fool"); // 🎮 게임 모드 (fool: 바보 라이어(기본값), classic: 클래식 라이어)
+  const [reconnectWaitTime, setReconnectWaitTime] = useState("60"); // ⏱️ 이탈자 재접속 대기시간 (30, 60, 90, 120초)
+  const [adminPassModalOpen, setAdminPassModalOpen] = useState(false); // 🔒 관리자 방 생성 비밀번호 확인 모달
+  const [adminPassInput, setAdminPassInput] = useState("");
+  const [adminPassError, setAdminPassError] = useState("");
+  const [disconnectNoticeModal, setDisconnectNoticeModal] = useState<{ type: "host" | "liar" | "not-enough"; message: string } | null>(null); // 이탈 전면 알림 모달
   const [selectedCategory, setSelectedCategory] = useState("ALL"); // 주제 카테고리 (ALL: 전체 무작위)
   const [categories, setCategories] = useState<string[]>(["ALL", "장소 / 놀거리", "음식 / 디저트", "직업", "동식물", "전자제품"]);
   const [fastTestMode, setFastTestMode] = useState<boolean>(false); // 테스트용 초스피드 모드 (모든 타이머 1초)
@@ -348,6 +372,7 @@ export default function App() {
       if (room.hintTime) setHintTime(String(room.hintTime));
       if (room.discussionTime) setDiscussionTime(String(room.discussionTime));
       if (room.defenseTime) setDefenseTime(String(room.defenseTime));
+      if (room.reconnectWaitTime) setReconnectWaitTime(String(room.reconnectWaitTime));
       if (room.liarCount) setLiarCount(String(room.liarCount));
       if (room.gameMode) setGameMode(room.gameMode);
       if (room.fastTestMode !== undefined) setFastTestMode(room.fastTestMode);
@@ -362,6 +387,46 @@ export default function App() {
     // 3-1) 실시간 힌트 히스토리 업데이트 수신 (player-hints-updated)
     socket.on("player-hints-updated", ({ playerHints: hints }) => {
       setPlayerHints(hints || {});
+    });
+
+    // 3-2) 이탈 이벤트 리스너 (방장 이탈, 라이어 이탈, 인원 부족)
+    socket.on("host-left-game", ({ message }) => {
+      setDisconnectNoticeModal({ type: "host", message });
+      setTimeout(() => {
+        setDisconnectNoticeModal(null);
+        setScreen("character");
+      }, 3200);
+    });
+
+    socket.on("liar-left-game", ({ message }) => {
+      setDisconnectNoticeModal({ type: "liar", message });
+      setTimeout(() => {
+        setDisconnectNoticeModal(null);
+        setGamePhase("waiting");
+        setScreen("room");
+      }, 3200);
+    });
+
+    socket.on("not-enough-players", ({ message }) => {
+      setDisconnectNoticeModal({ type: "not-enough", message });
+      setTimeout(() => {
+        setDisconnectNoticeModal(null);
+        setGamePhase("waiting");
+        setScreen("room");
+      }, 3200);
+    });
+
+    // 3-3) 재접속 복구 세션 수신 (game-reconnected)
+    socket.on("game-reconnected", ({ room, category, word, isLiar, gameMode, gamePhase, activeSpeakerSocketId, myInventory }) => {
+      setOnlinePlayers(room.players);
+      setSecretCategory(category);
+      setSecretWord(word);
+      setIsLiar(isLiar);
+      setGameMode(gameMode);
+      setGamePhase(gamePhase || "hint-turn");
+      setScreen("play");
+      if (activeSpeakerSocketId) setTurnSpeakerSocketId(activeSpeakerSocketId);
+      if (myInventory) setMyInventory(myInventory);
     });
 
     // 4) 실시간 채팅 수신 (각 유저별 독립 3초 말풍선 타이머 제어 - 다른 유저 말풍선 지워짐 100% 방지!)
@@ -891,20 +956,45 @@ export default function App() {
         portrait: myIcon,
       });
     } else {
-      // 새 방을 만드는 방장
-      socket.emit("create-room", {
-        roomCode: roomCode || "MANGO7",
-        roomTitle,
-        roomPassword,
-        maxPlayers,
-        liarCount,
-        hintTime,
-        discussionTime,
-        defenseTime,
-        nickname: currentNickname,
-        portrait: myIcon,
-      });
+      // 새 방을 만드는 방장 ➔ 🔒 관리자 방 생성 비밀번호(0307) 확인 모달 표출
+      setAdminPassError("");
+      setAdminPassInput("");
+      setAdminPassModalOpen(true);
     }
+  };
+
+  // [관리자 비밀번호 0307 확인 후 방 생성 제출 함수]
+  const handleCreateRoomWithAdminPassword = () => {
+    if (adminPassInput.trim() !== "0307") {
+      setAdminPassError("⚠️ 관리자 비밀번호가 올바르지 않습니다. (테스트 관리자 비밀번호: 0307)");
+      return;
+    }
+
+    const currentNickname = nickname.trim() || defaultNickname;
+    const myIcon = portraits[selectedPortrait] || "🦊";
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    socket.emit("create-room", {
+      roomCode: roomCode || "MANGO7",
+      roomTitle,
+      roomPassword,
+      adminPassword: "0307",
+      maxPlayers,
+      liarCount,
+      gameMode,
+      hintTime,
+      discussionTime,
+      defenseTime,
+      reconnectWaitTime,
+      nickname: currentNickname,
+      portrait: myIcon,
+    });
+
+    setAdminPassModalOpen(false);
+    setAdminPassError("");
   };
 
   // [방 참여 소켓 전송 함수]
@@ -1217,6 +1307,21 @@ export default function App() {
                       <option value="60">60초</option>
                     </select>
                   </label>
+                  <label>⏱️ 이탈 대기시간
+                    <select
+                      value={reconnectWaitTime}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        setReconnectWaitTime(val);
+                        handleUpdateRoomSettings({ reconnectWaitTime: val });
+                      }}
+                    >
+                      <option value="30">30초</option>
+                      <option value="60">60초 (기본)</option>
+                      <option value="90">90초</option>
+                      <option value="120">120초</option>
+                    </select>
+                  </label>
                   <label>라이어 수
                     <select
                       value={liarCount}
@@ -1259,8 +1364,8 @@ export default function App() {
               <div style={{ margin: "15px 0", fontSize: "13px", lineHeight: "1.8", color: "#5a5557" }}>
                 <p><b>방 제목:</b> {roomTitle}</p>
                 <p><b>게임 모드:</b> {gameMode === "fool" ? "🤪 바보 라이어 (다른 제시어 제공)" : "😈 클래식 라이어 (🚨 라이어 표기)"}</p>
-                <p><b>최대 인원:</b> {maxPlayers}명</p>
-                <p><b>라이어 수:</b> {liarCount}명</p>
+                <p><b>최대 인원:</b> {maxPlayers}명 | <b>라이어 수:</b> {liarCount}명</p>
+                <p><b>이탈 재접속 대기시간:</b> {reconnectWaitTime}초</p>
                 <p><b>힌트 / 토론 / 변론시간:</b> {hintTime}초 / {discussionTime}초 / {defenseTime}초</p>
               </div>
             )}
@@ -1881,6 +1986,76 @@ export default function App() {
               }}>
                 대기실로 돌아가기 ➜
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── 🔒 관리자 방 생성 비밀번호(0307) 입력 모달 ── */}
+        {adminPassModalOpen && (
+          <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(12px)", backgroundColor: "rgba(0,0,0,0.7)" }}>
+            <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center", border: "3px solid #7652dd" }}>
+              <span className="card-label" style={{ color: "#7652dd" }}>ADMIN AUTHENTICATION</span>
+              <div style={{ fontSize: "54px", margin: "10px 0" }}>🔒</div>
+              <h2 style={{ fontSize: "20px", margin: "5px 0 10px 0", color: "#2b2b2b" }}>
+                관리자 비밀번호 입력
+              </h2>
+              <p style={{ fontSize: "14px", color: "#666", marginBottom: "15px", lineHeight: "1.5" }}>
+                테스트 버전이므로 <b>관리자만 방을 생성</b>할 수 있습니다.
+              </p>
+              
+              <input
+                type="password"
+                value={adminPassInput}
+                onChange={(e) => setAdminPassInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateRoomWithAdminPassword(); }}
+                placeholder="비밀번호 입력"
+                style={{
+                  width: "100%", padding: "12px 16px", borderRadius: "12px", border: "2px solid #7652dd",
+                  fontSize: "16px", textAlign: "center", marginBottom: "10px"
+                }}
+                autoFocus
+              />
+
+              {adminPassError && (
+                <p style={{ color: "#ff4785", fontSize: "13px", fontWeight: "bold", margin: "5px 0 10px 0" }}>
+                  {adminPassError}
+                </p>
+              )}
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                <button className="primary-button" style={{ flex: 1 }} onClick={handleCreateRoomWithAdminPassword}>
+                  방 생성하기 ➔
+                </button>
+                <button
+                  style={{ padding: "12px 16px", borderRadius: "12px", border: "1px solid #ccc", background: "#f0f0f0", cursor: "pointer", fontWeight: "bold" }}
+                  onClick={() => setAdminPassModalOpen(false)}
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 🚨 플레이어 이탈 (방장 이탈 / 라이어 이탈 / 인원 부족) 전면 모달 ── */}
+        {disconnectNoticeModal && (
+          <div className="modal-backdrop" style={{ zIndex: 99999, backdropFilter: "blur(16px)", backgroundColor: "rgba(0,0,0,0.85)" }}>
+            <div className="nickname-modal" style={{
+              maxWidth: "480px", width: "90%", textAlign: "center",
+              border: `3px solid ${disconnectNoticeModal.type === "host" ? "#ff4785" : "#ff6f3c"}`,
+              boxShadow: "0 0 45px rgba(255,71,133,0.6)",
+              animation: "popIn 0.3s ease",
+            }}>
+              <span className="card-label" style={{ color: "#ff4785" }}>NOTICE</span>
+              <div style={{ fontSize: "64px", margin: "14px 0" }}>
+                {disconnectNoticeModal.type === "host" ? "👑" : disconnectNoticeModal.type === "liar" ? "🚨" : "📢"}
+              </div>
+              <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#2b2b2b", lineHeight: "1.4" }}>
+                {disconnectNoticeModal.message}
+              </h2>
+              <p style={{ fontSize: "14px", color: "#666" }}>
+                잠시 후 3초 뒤 자동으로 화면이 이동합니다...
+              </p>
             </div>
           </div>
         )}

@@ -110,7 +110,12 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 1. 방 만들기 (create-room)
   // ------------------------------------------------------------------
-  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, maxPlayers, liarCount, hintTime, discussionTime, defenseTime, nickname, portrait }) => {
+  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, adminPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, reconnectWaitTime, nickname, portrait }) => {
+    // 🔒 테스트 버전 관리자 방 생성 비밀번호 검증 (0307)
+    if (adminPassword !== "0307") {
+      return socket.emit("room-error", { message: "🔒 테스트 버전이므로 관리자만 방을 생성할 수 있습니다. (비밀번호 오류)" });
+    }
+
     const code = (roomCode || "MANGO7").toUpperCase().trim();
     
     // 방 생성
@@ -121,6 +126,7 @@ io.on("connection", (socket) => {
       icon: portrait || "🦊",
       isHost: true,
       ready: true, // 방장은 기본 ready
+      isDisconnected: false,
       color: hostColor.color,
       softColor: hostColor.softColor,
       stats: { citizenWin: 0, liarWin: 0, citizenLoss: 0, liarLoss: 0 }, // 실시간 누적 전적 초기화
@@ -132,10 +138,11 @@ io.on("connection", (socket) => {
       roomPassword: roomPassword || "",
       maxPlayers: Number(maxPlayers) || 12,
       liarCount: Number(liarCount) || 1,
-      gameMode: "fool", // 🎮 게임 모드 기본값: 바보 라이어 모드 (다른 제시어 제공)
+      gameMode: gameMode || "fool", // 🎮 게임 모드 기본값: 바보 라이어 모드
       hintTime: Number(hintTime) || 20,
       discussionTime: Number(discussionTime) || 40,
       defenseTime: Number(defenseTime) || 45,
+      reconnectWaitTime: Number(reconnectWaitTime) || 60, // ⏱️ 이탈자 대기시간 (기본 60초)
       players: [hostPlayer],
       currentWordInfo: null,
       liarSocketIds: [],
@@ -175,6 +182,50 @@ io.on("connection", (socket) => {
       return socket.emit("room-error", { message: "방 정원이 가득 찼습니다." });
     }
 
+    // 💡 이탈한 참가자의 재접속 처리 (동일 닉네임 및 이탈 상태 감지)
+    const targetName = nickname || `참여자_${room.players.length + 1}`;
+    const disconnectedP = room.players.find((p) => p.name === targetName && p.isDisconnected);
+
+    if (disconnectedP) {
+      disconnectedP.socketId = socket.id;
+      disconnectedP.isDisconnected = false;
+      socket.join(code);
+      socket.data.roomCode = code;
+      socket.data.nickname = disconnectedP.name;
+
+      console.log(`🔄 [재접속 복구] 방: ${code}, 참가자: ${disconnectedP.name}`);
+
+      socket.emit("room-joined", {
+        success: true,
+        room,
+        myPlayer: disconnectedP,
+      });
+
+      // 만약 게임 중이었다면 이전 비밀 제시어 및 진행 상태 즉시 복구 패킷 전달
+      if (room.gameState === "playing") {
+        const isLiar = room.liarSocketIds.includes(socket.id) || room.liarSocketIds.includes(disconnectedP.socketId);
+        const word = isLiar
+          ? (room.gameMode === "fool" ? room.currentWordInfo?.foolWord : "🚨 라이어")
+          : room.currentWordInfo?.word;
+
+        socket.emit("game-reconnected", {
+          room,
+          category: room.currentWordInfo?.category,
+          word,
+          realWord: room.currentWordInfo?.word,
+          foolWord: room.currentWordInfo?.foolWord,
+          isLiar,
+          gameMode: room.gameMode || "fool",
+          gamePhase: room.phase,
+          activeSpeakerSocketId: room.activeSpeakerSocketId,
+          myInventory: disconnectedP.inventory || { tomato: 2, egg: 2, water: 2, banana: 2 },
+        });
+      }
+
+      io.to(code).emit("room-updated", { room, categories: getCategories() });
+      return;
+    }
+
     if (room.gameState === "playing") {
       return socket.emit("room-error", { message: "이미 게임이 진행 중인 방입니다." });
     }
@@ -211,7 +262,7 @@ io.on("connection", (socket) => {
     io.to(code).emit("room-updated", { room });
   });
 
-  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, fastTestMode, selectedCategory }) => {
+  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, reconnectWaitTime, fastTestMode, selectedCategory }) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
     if (!room) return;
@@ -228,10 +279,11 @@ io.on("connection", (socket) => {
     if (hintTime !== undefined) room.hintTime = Number(hintTime);
     if (discussionTime !== undefined) room.discussionTime = Number(discussionTime);
     if (defenseTime !== undefined) room.defenseTime = Number(defenseTime);
+    if (reconnectWaitTime !== undefined) room.reconnectWaitTime = Number(reconnectWaitTime);
     if (fastTestMode !== undefined) room.fastTestMode = Boolean(fastTestMode);
     if (selectedCategory !== undefined) room.selectedCategory = selectedCategory;
 
-    console.log(`⚙️ [방 설정 변경] 방: ${code}, 모드: ${room.gameMode}, 힌트시간: ${room.hintTime}초, 변론시간: ${room.defenseTime}초, 주제: ${room.selectedCategory}`);
+    console.log(`⚙️ [방 설정 변경] 방: ${code}, 모드: ${room.gameMode}, 이탈대기: ${room.reconnectWaitTime}초, 힌트시간: ${room.hintTime}초`);
 
     io.to(code).emit("room-updated", { room, categories: getCategories() });
   });
