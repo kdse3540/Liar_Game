@@ -110,7 +110,7 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   // 1. 방 만들기 (create-room)
   // ------------------------------------------------------------------
-  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, adminPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, reconnectWaitTime, nickname, portrait }) => {
+  socket.on("create-room", ({ roomCode, roomTitle, roomPassword, adminPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, nickname, portrait }) => {
     // 🔒 테스트 버전 관리자 방 생성 비밀번호 검증 (0307)
     if (adminPassword !== "0307") {
       return socket.emit("room-error", { message: "🔒 테스트 버전이므로 관리자만 방을 생성할 수 있습니다. (비밀번호 오류)" });
@@ -142,7 +142,6 @@ io.on("connection", (socket) => {
       hintTime: Number(hintTime) || 20,
       discussionTime: Number(discussionTime) || 40,
       defenseTime: Number(defenseTime) || 45,
-      reconnectWaitTime: Number(reconnectWaitTime) || 60, // ⏱️ 이탈자 대기시간 (기본 60초)
       players: [hostPlayer],
       currentWordInfo: null,
       liarSocketIds: [],
@@ -218,7 +217,7 @@ io.on("connection", (socket) => {
     io.to(code).emit("room-updated", { room });
   });
 
-  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, reconnectWaitTime, fastTestMode, selectedCategory }) => {
+  socket.on("update-room-settings", ({ roomTitle, roomPassword, maxPlayers, liarCount, gameMode, hintTime, discussionTime, defenseTime, fastTestMode, selectedCategory }) => {
     const code = socket.data.roomCode;
     const room = rooms[code];
     if (!room) return;
@@ -235,11 +234,10 @@ io.on("connection", (socket) => {
     if (hintTime !== undefined) room.hintTime = Number(hintTime);
     if (discussionTime !== undefined) room.discussionTime = Number(discussionTime);
     if (defenseTime !== undefined) room.defenseTime = Number(defenseTime);
-    if (reconnectWaitTime !== undefined) room.reconnectWaitTime = Number(reconnectWaitTime);
     if (fastTestMode !== undefined) room.fastTestMode = Boolean(fastTestMode);
     if (selectedCategory !== undefined) room.selectedCategory = selectedCategory;
 
-    console.log(`⚙️ [방 설정 변경] 방: ${code}, 모드: ${room.gameMode}, 이탈대기: ${room.reconnectWaitTime}초, 힌트시간: ${room.hintTime}초`);
+    console.log(`⚙️ [방 설정 변경] 방: ${code}, 모드: ${room.gameMode}, 힌트시간: ${room.hintTime}초, 변론시간: ${room.defenseTime}초`);
 
     io.to(code).emit("room-updated", { room, categories: getCategories() });
   });

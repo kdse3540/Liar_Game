@@ -320,6 +320,14 @@
 - **특이사항/의존성:** `Portrait/` 이미지들을 정적 에셋 경로 `public/portraits/`로 복사 동기화 완료. `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-23 / 대기실 이탈 대기시간(reconnectWaitTime) UI 및 관련 코드 완전 제거]
+- **관련 파일 경로:** `src/App.tsx` (state 및 대기실 `ROUND SETTINGS` 패널, 요약 정보), `server/index.js` (`create-room`, `update-room-settings`)
+- **핵심 기능 및 역할:** 게임 중 이탈자 즉시 제외 규칙 개편에 따라 더 이상 불필요해진 '이탈 대기시간(reconnectWaitTime)' 대기실 설정 셀렉트 박스, 일반 참여자용 요약 텍스트, 프론트/백엔드 소켓 파라미터 및 State를 완전히 제거하여 깔끔하게 정리함.
+- **주요 함수/에셋 레퍼런스:** `reconnectWaitTime` 관련 UI 및 이벤트 payload 정리.
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
 
 
 

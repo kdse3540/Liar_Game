@@ -274,7 +274,6 @@ export default function App() {
   const [defenseTime, setDefenseTime] = useState("45");
   const [liarCount, setLiarCount] = useState("1");
   const [gameMode, setGameMode] = useState<"fool" | "classic">("fool"); // 🎮 게임 모드 (fool: 바보 라이어(기본값), classic: 클래식 라이어)
-  const [reconnectWaitTime, setReconnectWaitTime] = useState("60"); // ⏱️ 이탈자 재접속 대기시간 (30, 60, 90, 120초)
   const [adminPassModalOpen, setAdminPassModalOpen] = useState(false); // 🔒 관리자 방 생성 비밀번호 확인 모달
   const [adminPassInput, setAdminPassInput] = useState("");
   const [adminPassError, setAdminPassError] = useState("");
@@ -459,7 +458,6 @@ export default function App() {
       if (room.hintTime) setHintTime(String(room.hintTime));
       if (room.discussionTime) setDiscussionTime(String(room.discussionTime));
       if (room.defenseTime) setDefenseTime(String(room.defenseTime));
-      if (room.reconnectWaitTime) setReconnectWaitTime(String(room.reconnectWaitTime));
       if (room.liarCount) setLiarCount(String(room.liarCount));
       if (room.gameMode) setGameMode(room.gameMode);
       if (room.fastTestMode !== undefined) setFastTestMode(room.fastTestMode);
@@ -1071,7 +1069,6 @@ export default function App() {
         hintTime,
         discussionTime,
         defenseTime,
-        reconnectWaitTime,
         nickname: currentNickname,
         portrait: myIcon,
       });
@@ -1441,21 +1438,6 @@ export default function App() {
                       <option value="60">60초</option>
                     </select>
                   </label>
-                  <label>⏱️ 이탈 대기시간
-                    <select
-                      value={reconnectWaitTime}
-                      onChange={(event) => {
-                        const val = event.target.value;
-                        setReconnectWaitTime(val);
-                        handleUpdateRoomSettings({ reconnectWaitTime: val });
-                      }}
-                    >
-                      <option value="30">30초</option>
-                      <option value="60">60초 (기본)</option>
-                      <option value="90">90초</option>
-                      <option value="120">120초</option>
-                    </select>
-                  </label>
                   <label>라이어 수
                     <select
                       value={liarCount}
@@ -1499,7 +1481,6 @@ export default function App() {
                 <p><b>방 제목:</b> {roomTitle}</p>
                 <p><b>게임 모드:</b> {gameMode === "fool" ? "🤪 바보 라이어 (다른 제시어 제공)" : "😈 클래식 라이어 (🚨 라이어 표기)"}</p>
                 <p><b>최대 인원:</b> {maxPlayers}명 | <b>라이어 수:</b> {liarCount}명</p>
-                <p><b>이탈 재접속 대기시간:</b> {reconnectWaitTime}초</p>
                 <p><b>힌트 / 토론 / 변론시간:</b> {hintTime}초 / {discussionTime}초 / {defenseTime}초</p>
               </div>
             )}
