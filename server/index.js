@@ -440,6 +440,7 @@ io.on("connection", (socket) => {
       if (room.turnCount >= room.players.length) {
         room.phase = "free-talk";
         room.activeSpeakerSocketId = ""; // 전원 자유 대화 해금
+        room.skipDiscussionVotes = []; // 💡 자유토론 조기종료 동의 목록 초기화
 
         const discSec = getEffectiveSec(room, room.discussionTime || 40);
         console.log(`💬 [자유 토론 시작] 방: ${code}, ${discSec}초간 자유 토론 진입 (테스트모드: ${Boolean(room.fastTestMode)})`);
@@ -478,6 +479,110 @@ io.on("connection", (socket) => {
         activeSpeakerName: room.players[room.turnIndex]?.name,
         hintTime: getEffectiveSec(room, room.hintTime || 20),
       });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // 5-1b. 최후변론 / 자기변호 조기 종료 (pass-defense)
+  // ------------------------------------------------------------------
+  socket.on("pass-defense", () => {
+    const code = socket.data.roomCode;
+    const room = rooms[code];
+    if (!room || room.gameState !== "playing") return;
+
+    // 현재 발언자 본인만 변론을 조기 종료할 수 있음
+    if (room.activeSpeakerSocketId !== socket.id) return;
+
+    // 쿨다운 검사 (연타 방지)
+    const now = Date.now();
+    if (room.lastDefensePassTime && now - room.lastDefensePassTime < 1000) {
+      return;
+    }
+    room.lastDefensePassTime = now;
+
+    if (room.phase === "final-defense") {
+      console.log(`⚖️ [최후변론 조기 종료] 발언자(${socket.id})가 변론을 완료했습니다.`);
+      if (roomTimers[code]) clearTimeout(roomTimers[code]);
+      startPostVoteFreeTalk(code, room.topVotedSocketIds || []);
+    } else if (room.phase === "self-defense") {
+      console.log(`🎤 [자기 변호 조기 종료] 발언자(${socket.id})가 변호를 완료했습니다.`);
+      if (roomTimers[code]) clearTimeout(roomTimers[code]);
+      room.selfDefenseIndex = (room.selfDefenseIndex || 0) + 1;
+      startNextSelfDefense(code);
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // 5-1c. 자유토론 100% 만장일치 조기 종료 투표 (toggle-skip-discussion)
+  // ------------------------------------------------------------------
+  socket.on("toggle-skip-discussion", () => {
+    const code = socket.data.roomCode;
+    const room = rooms[code];
+    if (!room || room.gameState !== "playing") return;
+
+    const isFreeTalk = room.phase === "free-talk";
+    const isPostVoteFreeTalk = room.phase === "post-vote-free-talk";
+    if (!isFreeTalk && !isPostVoteFreeTalk) return;
+
+    // 탈락자 제외 검사
+    if (room.eliminatedSocketIds && room.eliminatedSocketIds.includes(socket.id)) return;
+
+    // 투표 후 자유토론 시 최다 득표자(제외자)는 투표 불가
+    if (isPostVoteFreeTalk && room.postVoteExcluded && room.postVoteExcluded.includes(socket.id)) return;
+
+    if (!room.skipDiscussionVotes) room.skipDiscussionVotes = [];
+
+    // 토글: 이미 눌렀으면 취소, 아니면 추가
+    const existingIndex = room.skipDiscussionVotes.indexOf(socket.id);
+    if (existingIndex > -1) {
+      room.skipDiscussionVotes.splice(existingIndex, 1);
+    } else {
+      room.skipDiscussionVotes.push(socket.id);
+    }
+
+    // 유효 토론 참여자 총인원 계산
+    const activePlayers = room.players.filter(p => !(room.eliminatedSocketIds || []).includes(p.socketId));
+    let totalCount = activePlayers.length;
+    if (isPostVoteFreeTalk && room.postVoteExcluded) {
+      totalCount = activePlayers.filter(p => !room.postVoteExcluded.includes(p.socketId)).length;
+    }
+    totalCount = Math.max(1, totalCount);
+
+    const skipCount = room.skipDiscussionVotes.length;
+    const percent = Math.round((skipCount / totalCount) * 100);
+    const isCompleted = skipCount >= totalCount; // 100% 전원 만장일치
+
+    console.log(`⚡ [토론 조기종료 투표] 방: ${code}, phase: ${room.phase}, 동의: ${skipCount}/${totalCount} (${percent}%)`);
+
+    io.to(code).emit("discussion-skip-updated", {
+      skipCount,
+      totalCount,
+      percent,
+      voterSocketIds: room.skipDiscussionVotes,
+      isCompleted,
+    });
+
+    // 100% 만장일치 달성 시 즉시 다음 단계로 전환!
+    if (isCompleted) {
+      console.log(`🎉 [토론 조기종료 100% 만장일치 달성!] 즉시 다음 투표 단계로 전환합니다.`);
+      if (roomTimers[code]) clearTimeout(roomTimers[code]);
+      room.skipDiscussionVotes = [];
+
+      if (isFreeTalk) {
+        room.phase = "vote";
+        io.to(code).emit("game-phase-changed", {
+          phase: "vote",
+          activeSpeakerSocketId: "",
+          message: "🗳️ 전원 동의로 자유토론이 조기 종료되었습니다! 1차 라이어 지목 투표를 시작합니다! (8초)",
+        });
+      } else if (isPostVoteFreeTalk) {
+        const excludedSocketIds = room.postVoteExcluded || [];
+        if (excludedSocketIds.length === 1) {
+          startFinalDecisionVote(code, excludedSocketIds[0]);
+        } else {
+          startReVote(code, excludedSocketIds);
+        }
+      }
     }
   });
 
@@ -615,10 +720,11 @@ io.on("connection", (socket) => {
     if (topIds.length === 0) return;
 
     if (topIds.length === 1) {
-      // ── CASE 1: 단일 최다 득표자 → 최후변론 7초 ──
+      // ── CASE 1: 단일 최다 득표자 → 최후변론 (방장이 설정한 defenseTime 반영) ──
       const targetPlayer = room.players.find(p => p.socketId === topIds[0]);
-      const defenseSec = getEffectiveSec(room, 7);
-      console.log(`⚖️ [최후변론 시작] ${targetPlayer?.name || "참여자"}, ${defenseSec}초`);
+      // 💡 [동적 변론시간 반영] 하드코딩 7초 대신 방 설정 defenseTime(기본 45초) 적용
+      const defenseSec = getEffectiveSec(room, room.defenseTime || 45);
+      console.log(`⚖️ [최후변론 시작] ${targetPlayer?.name || "참여자"}, ${defenseSec}초 (설정값: ${room.defenseTime}초)`);
 
       room.phase = "final-defense";
       io.to(code).emit("game-phase-changed", {
@@ -632,15 +738,15 @@ io.on("connection", (socket) => {
         },
       });
 
-      // 7초 후 → 자유토론(10초) 시작 (최다 득표자 제외)
+      // 설정된 변론 시간(defenseSec) 후 → 자유토론(10초) 시작 (최다 득표자 제외)
       if (roomTimers[code]) clearTimeout(roomTimers[code]);
       roomTimers[code] = setTimeout(() => {
         if (!rooms[code]) return; // [방어 코드] 방이 이미 삭제된 경우 실행 중단
         startPostVoteFreeTalk(code, topIds);
-      }, 7000);
+      }, defenseSec * 1000);
 
     } else {
-      // ── CASE 2: 공동 최다 득표자(동률) → 자기 변호 순서대로 7초씩 ──
+      // ── CASE 2: 공동 최다 득표자(동률) → 자기 변호 순서대로 진행 ──
       room.selfDefenseQueue = [...topIds]; // 자기변호 대기열
       room.selfDefenseIndex = 0;
       startNextSelfDefense(code);
@@ -652,7 +758,7 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------------
   /**
    * startNextSelfDefense(roomCode)
-   * 자기변호 대기열에서 다음 변호자를 꺼내 7초간 발언 부여
+   * 자기변호 대기열에서 다음 변호자를 꺼내 방 설정 defenseTime만큼 발언 부여
    */
   function startNextSelfDefense(code) {
     const room = rooms[code];
@@ -669,7 +775,9 @@ io.on("connection", (socket) => {
 
     const speakerId = queue[idx];
     const speakerPlayer = room.players.find(p => p.socketId === speakerId);
-    console.log(`🎤 [자기 변호 ${idx + 1}/${queue.length}] ${speakerPlayer?.name || "참여자"}, 7초`);
+    // 💡 [동적 변론시간 반영] 방 설정 defenseTime(기본 45초) 적용
+    const defenseSec = getEffectiveSec(room, room.defenseTime || 45);
+    console.log(`🎤 [자기 변호 ${idx + 1}/${queue.length}] ${speakerPlayer?.name || "참여자"}, ${defenseSec}초 (설정값: ${room.defenseTime}초)`);
 
     room.phase = "self-defense";
     io.to(code).emit("game-phase-changed", {
@@ -681,17 +789,17 @@ io.on("connection", (socket) => {
         totalDefenseCount: queue.length,
         speakerName: speakerPlayer?.name || "참여자",
         speakerIcon: speakerPlayer?.icon || "🦊",
-        timeSec: 7,
+        timeSec: defenseSec,
       },
     });
 
-    // 7초 후 다음 자기변호 진행
+    // 설정된 변론 시간(defenseSec) 후 다음 자기변호 진행
     if (roomTimers[code]) clearTimeout(roomTimers[code]);
     roomTimers[code] = setTimeout(() => {
       if (!rooms[code]) return; // [방어 코드] 방이 이미 삭제된 경우 실행 중단
       room.selfDefenseIndex = idx + 1;
       startNextSelfDefense(code);
-    }, 7000);
+    }, defenseSec * 1000);
   }
 
   // ------------------------------------------------------------------
@@ -710,6 +818,7 @@ io.on("connection", (socket) => {
 
     room.phase = "post-vote-free-talk";
     room.postVoteExcluded = excludedSocketIds; // 채팅 잠금 대상 저장
+    room.skipDiscussionVotes = []; // 💡 투표 후 자유토론 조기종료 동의 목록 초기화
     io.to(code).emit("game-phase-changed", {
       phase: "post-vote-free-talk",
       activeSpeakerSocketId: "",
@@ -1407,6 +1516,51 @@ io.on("connection", (socket) => {
           }
           if (roomTimers[code]) clearTimeout(roomTimers[code]);
           startNextSelfDefense(code);
+        }
+      } else if (room.phase === "free-talk" || room.phase === "post-vote-free-talk") {
+        // 💡 자유토론 중 플레이어 이탈 시 조기종료 투표 목록 재계산
+        if (room.skipDiscussionVotes) {
+          room.skipDiscussionVotes = room.skipDiscussionVotes.filter(id => id !== socket.id);
+          const isPostVote = room.phase === "post-vote-free-talk";
+          const activePlayers = room.players.filter(p => !(room.eliminatedSocketIds || []).includes(p.socketId));
+          let totalCount = activePlayers.length;
+          if (isPostVote && room.postVoteExcluded) {
+            totalCount = activePlayers.filter(p => !room.postVoteExcluded.includes(p.socketId)).length;
+          }
+          totalCount = Math.max(1, totalCount);
+          const skipCount = room.skipDiscussionVotes.length;
+          const percent = Math.round((skipCount / totalCount) * 100);
+          const isCompleted = skipCount >= totalCount; // 100% 만장일치
+
+          io.to(code).emit("discussion-skip-updated", {
+            skipCount,
+            totalCount,
+            percent,
+            voterSocketIds: room.skipDiscussionVotes,
+            isCompleted,
+          });
+
+          if (isCompleted) {
+            console.log(`🎉 [이탈 후 100% 만장일치 충족] 즉시 다음 투표 단계로 전환`);
+            if (roomTimers[code]) clearTimeout(roomTimers[code]);
+            room.skipDiscussionVotes = [];
+
+            if (!isPostVote) {
+              room.phase = "vote";
+              io.to(code).emit("game-phase-changed", {
+                phase: "vote",
+                activeSpeakerSocketId: "",
+                message: "🗳️ 전원 동의로 자유토론이 조기 종료되었습니다! 1차 라이어 지목 투표를 시작합니다! (8초)",
+              });
+            } else {
+              const excludedSocketIds = room.postVoteExcluded || [];
+              if (excludedSocketIds.length === 1) {
+                startFinalDecisionVote(code, excludedSocketIds[0]);
+              } else {
+                startReVote(code, excludedSocketIds);
+              }
+            }
+          }
         }
       }
 

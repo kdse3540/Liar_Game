@@ -360,12 +360,22 @@ export default function App() {
   const [gameResultData, setGameResultData] = useState<any>(null);                    // 게임 최종 결과 데이터
   const [innocentClearedNotice, setInnocentClearedNotice] = useState<{ targetName: string; targetIcon: string; innocentPercent: number } | null>(null); // 80% 무죄 구제 안내 모달
 
+  // ── 💡 자유토론 100% 조기종료 투표 상태 ──
+  const [discussionSkipData, setDiscussionSkipData] = useState<{
+    skipCount: number;
+    totalCount: number;
+    percent: number;
+    voterSocketIds: string[];
+    isCompleted: boolean;
+  } | null>(null);
+
   // 시스템 발언/공지 진행 중에만 주변 UI 회색빛 디밍 적용 (발언 시작 시 자동 풀림)
   // 투표 후 플로우 모달(최후변론/자기변호/자유토론/최종결정/재투표/80%무죄구제) 표시 시에도 디밍 적용
   const isNoticeDimmed = gamePhase === "notice" || gamePhase === "countdown" || isSystemTyping || showFreeTalkNotice || Boolean(speakerTurnNotice) || showPostVoteNotice || Boolean(innocentClearedNotice);
 
   const isPassingRef = useRef(false);
 
+  // [힌트 발언 완료 핸들러]
   const handleTurnPass = () => {
     if (isPassingRef.current) return;
     isPassingRef.current = true;
@@ -373,6 +383,21 @@ export default function App() {
     setTimeout(() => {
       isPassingRef.current = false;
     }, 1200);
+  };
+
+  // [최후변론 / 자기변호 발언 완료 핸들러]
+  const handlePassDefense = () => {
+    if (isPassingRef.current) return;
+    isPassingRef.current = true;
+    socket.emit("pass-defense");
+    setTimeout(() => {
+      isPassingRef.current = false;
+    }, 1200);
+  };
+
+  // [자유토론 100% 조기종료 투표 토글 핸들러]
+  const handleToggleSkipDiscussion = () => {
+    socket.emit("toggle-skip-discussion");
   };
 
   // 대기실 방 설정(게임모드, 힌트시간, 토론시간 등) 변경 시 백엔드로 즉시 실시간 소켓 송신
@@ -650,6 +675,8 @@ export default function App() {
       setScreen("play");
       setGamePhase("countdown");
       setHintTime(String(room.hintTime || 20)); // 방장이 설정한 힌트 시간 100% 반영
+      setDiscussionTime(String(room.discussionTime || 40)); // 방장이 설정한 자유 토론 시간 100% 반영
+      setDefenseTime(String(room.defenseTime || 45)); // 방장이 설정한 최후변론 시간 100% 반영
       setTurnSpeakerSocketId(activeSpeakerSocketId || room.players[0]?.socketId || "");
       setEliminatedSocketIds([]);
 
@@ -673,6 +700,7 @@ export default function App() {
       setHasFinalVoted(false);
       setVoteTallyData(null);
       setRouletteData(null);
+      setDiscussionSkipData(null); // 💡 조기종료 투표 초기화
 
       // 3, 2, 1 카운트다운 타이머 연출
       setCountdownNum(3);
@@ -782,12 +810,15 @@ export default function App() {
     // 7) 페이즈 변경 수신 (game-phase-changed)
     socket.on("game-phase-changed", ({ phase, activeSpeakerSocketId, discussionTime: dSec, message, payload }) => {
       setGamePhase(phase as any);
+      setDiscussionSkipData(null); // 💡 페이즈 전환 시 조기종료 투표 상태 리셋
 
       if (phase === "free-talk") {
+        const effectiveSec = dSec || Number(discussionTime) || 40;
+        setDiscussionTime(String(effectiveSec));
         setShowFreeTalkNotice(true);
-        setTurnTimeLeft(dSec || Number(discussionTime) || 40);
+        setTurnTimeLeft(effectiveSec);
 
-        const freeTalkMsg = `📢 [시스템] ${dSec || discussionTime}초간 자유 토론이 시작되었습니다! 자유롭게 추리하세요.`;
+        const freeTalkMsg = `📢 [시스템] ${effectiveSec}초간 자유 토론이 시작되었습니다! 자유롭게 추리하세요.`;
         let fIdx = 0;
         setIsSystemTyping(true);
         setTurnNoticeText("");
@@ -817,9 +848,11 @@ export default function App() {
 
       // ── 최후변론 (final-defense) 수신: 차례 안내 모달 표시 후 타이머 시작 ──
       if (phase === "final-defense" && payload) {
+        const effectiveDefenseSec = payload.timeSec || Number(defenseTime) || 45;
+        setDefenseTime(String(effectiveDefenseSec));
         setTopVotedSocketIds(payload.topVotedSocketIds || []);
         setShowPostVoteNotice(true);
-        setTurnTimeLeft(payload.timeSec || 7);
+        setTurnTimeLeft(effectiveDefenseSec);
 
         // 차례 안내 모달을 2초간 보여준 후 닫고 발언 시작
         setTimeout(() => {
@@ -828,15 +861,17 @@ export default function App() {
 
         setChatLog((logs) => [
           ...logs,
-          { text: `📢 [시스템] ⚖️ [${payload.speakerName}] 님의 최후변론이 시작됩니다! (${payload.timeSec}초)`, time: "방금" },
+          { text: `📢 [시스템] ⚖️ [${payload.speakerName}] 님의 최후변론이 시작됩니다! (${effectiveDefenseSec}초)`, time: "방금" },
         ]);
       }
 
       // ── 자기 변호 (self-defense) 수신: 차례 안내 모달 표시 후 타이머 시작 ──
       if (phase === "self-defense" && payload) {
+        const effectiveDefenseSec = payload.timeSec || Number(defenseTime) || 45;
+        setDefenseTime(String(effectiveDefenseSec));
         setTopVotedSocketIds(payload.topVotedSocketIds || []);
         setShowPostVoteNotice(true);
-        setTurnTimeLeft(payload.timeSec || 7);
+        setTurnTimeLeft(effectiveDefenseSec);
 
         // 차례 안내 모달을 2초간 보여준 후 닫고 발언 시작
         setTimeout(() => {
@@ -845,7 +880,7 @@ export default function App() {
 
         setChatLog((logs) => [
           ...logs,
-          { text: `📢 [시스템] 🎤 [${payload.speakerName}] 님의 자기 변호가 시작됩니다! (${payload.currentDefenseIndex + 1}/${payload.totalDefenseCount}, ${payload.timeSec}초)`, time: "방금" },
+          { text: `📢 [시스템] 🎤 [${payload.speakerName}] 님의 자기 변호가 시작됩니다! (${payload.currentDefenseIndex + 1}/${payload.totalDefenseCount}, ${effectiveDefenseSec}초)`, time: "방금" },
         ]);
       }
 
@@ -1004,6 +1039,11 @@ export default function App() {
       ]);
     });
 
+    // 15) 자유토론 100% 조기종료 동의 현황 수신 (discussion-skip-updated)
+    socket.on("discussion-skip-updated", (data) => {
+      setDiscussionSkipData(data);
+    });
+
     return () => {
       socket.off("room-joined");
       socket.off("room-password-required");
@@ -1020,6 +1060,7 @@ export default function App() {
       socket.off("final-decision-result");
       socket.off("re-vote-result");
       socket.off("innocent-cleared-notice");
+      socket.off("discussion-skip-updated");
     };
   }, [currentRound]);
 
@@ -2371,16 +2412,106 @@ export default function App() {
                            : "남은 발언 시간"}
                         </small>
 
-                        {/* 힌트 턴 시 발언권 본인 전용 [발언 완료] 버튼 */}
+                        {/* 1) 힌트 턴 시 발언권 본인 전용 [발언 완료] 버튼 */}
                         {gamePhase === "hint-turn" && isMyTurn && (
                           <button
+                            type="button"
                             className="primary-button small"
-                            style={{ marginTop: "10px", background: "#10b981", borderColor: "#059669" }}
+                            style={{ marginTop: "10px", background: "#10b981", borderColor: "#059669", boxShadow: "0 0 12px rgba(16,185,129,0.4)" }}
                             onClick={handleTurnPass}
                           >
                             발언 완료 ➔
                           </button>
                         )}
+
+                        {/* 2) 최후변론 / 자기변호 시 현재 발언자 전용 [변론 완료] 버튼 */}
+                        {isDefensePhase && turnSpeakerSocketId === myId && (
+                          <button
+                            type="button"
+                            className="primary-button small"
+                            style={{ marginTop: "10px", background: "#ff4785", borderColor: "#e0316e", boxShadow: "0 0 12px rgba(255,71,133,0.5)" }}
+                            onClick={handlePassDefense}
+                          >
+                            ⚖️ 변론 완료 ➔
+                          </button>
+                        )}
+
+                        {/* 3) 자유토론 / 투표 후 자유토론 시 100% 만장일치 조기종료 투표 UI */}
+                        {isFreeTalk && (() => {
+                          const isPostVoteFreeTalk = gamePhase === "post-vote-free-talk";
+                          const isExcluded = isPostVoteFreeTalk && postVoteExcludedIds.includes(myId || "");
+                          const isEliminated = eliminatedSocketIds.includes(myId || "");
+
+                          if (isExcluded) {
+                            return (
+                              <p style={{ marginTop: "10px", fontSize: "11px", color: "#888", fontWeight: "bold" }}>
+                                🔒 최다 득표자는 토론에 참여할 수 없습니다.
+                              </p>
+                            );
+                          }
+                          if (isEliminated) {
+                            return (
+                              <p style={{ marginTop: "10px", fontSize: "11px", color: "#888" }}>
+                                🔒 탈락자는 토론 조기종료에 참여할 수 없습니다.
+                              </p>
+                            );
+                          }
+
+                          // 활성 유효 인원 계산
+                          const activeCount = onlinePlayers.length - eliminatedSocketIds.length;
+                          const effectiveTotal = isPostVoteFreeTalk
+                            ? Math.max(1, activeCount - postVoteExcludedIds.length)
+                            : Math.max(1, activeCount);
+
+                          const skipCount = discussionSkipData?.skipCount || 0;
+                          const totalCount = discussionSkipData?.totalCount || effectiveTotal;
+                          const hasAgreed = Boolean(discussionSkipData?.voterSocketIds?.includes(myId || ""));
+                          const percent = Math.min(100, Math.round((skipCount / Math.max(1, totalCount)) * 100));
+
+                          return (
+                            <div style={{ width: "100%", marginTop: "10px" }}>
+                              {/* 실시간 동의율 프로그레스 바 */}
+                              <div style={{ width: "100%", height: "6px", background: "#e2e8f0", borderRadius: "3px", overflow: "hidden", marginBottom: "6px" }}>
+                                <div
+                                  style={{
+                                    width: `${percent}%`,
+                                    height: "100%",
+                                    background: hasAgreed ? "#10b981" : "#635bff",
+                                    transition: "width 0.3s ease",
+                                  }}
+                                />
+                              </div>
+
+                              {/* 조기 종료 토글 버튼 */}
+                              <button
+                                type="button"
+                                onClick={handleToggleSkipDiscussion}
+                                style={{
+                                  width: "100%",
+                                  padding: "8px 10px",
+                                  borderRadius: "10px",
+                                  fontSize: "12px",
+                                  fontWeight: "bold",
+                                  cursor: "pointer",
+                                  transition: "all 0.2s ease",
+                                  border: hasAgreed ? "2px solid #10b981" : "2px solid #635bff",
+                                  background: hasAgreed ? "#cbf7e6" : "#f3f0ff",
+                                  color: hasAgreed ? "#059669" : "#635bff",
+                                  boxShadow: hasAgreed ? "0 0 10px rgba(16,185,129,0.35)" : "none",
+                                }}
+                              >
+                                {hasAgreed
+                                  ? `✓ 조기 종료 동의됨 (${skipCount}/${totalCount}명)`
+                                  : `⚡ 토론 조기 종료 (${skipCount}/${totalCount}명)`}
+                              </button>
+
+                              <div style={{ fontSize: "10px", color: "#888", marginTop: "4px", textAlign: "center" }}>
+                                ※ 전원({totalCount}명) 동의 시 즉시 투표로 이동
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         <p style={{ marginTop: "8px" }}>
                           {isFreeTalk ? "자유롭게 대화하며 라이어를 찾아내세요!"
                            : isFinalDefense ? "최다 득표자가 최후변론을 진행하고 있습니다."

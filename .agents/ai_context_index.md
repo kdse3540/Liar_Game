@@ -360,6 +360,26 @@
 - **특이사항/의존성:** `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-25 / ⏱️ 대기실 자유토론시간(discussionTime) 및 최후변론시간(defenseTime) 인게임 100% 반영 수정]
+- **관련 파일 경로:** `server/index.js` (`startPostVoteFlow`, `startNextSelfDefense`), `src/App.tsx` (`socket.on("game-started")`, `socket.on("game-phase-changed")`)
+- **핵심 기능 및 역할:**
+  1. 백엔드에서 최후변론 및 자기변호 진행 시 7초로 하드코딩되어 있던 타이머와 소켓 페이로드를 방 설정 `defenseTime`(15초/30초/45초/60초)으로 동적 적용되도록 전면 수정함.
+  2. 프론트엔드 `game-started` 및 `game-phase-changed` 수신 시 `discussionTime`과 `defenseTime` 상태를 확실하게 동기화하고 안내 모달 텍스트 및 남은 시간 카운트다운에 100% 일치하도록 보정함.
+- **주요 함수/에셋 레퍼런스:** `startPostVoteFlow`, `startNextSelfDefense`, `defenseTime`, `discussionTime`, `turnTimeLeft`, `game-phase-changed`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
+---
+## [2026-08-25 / ⚡ 모든 발언시간(최후변론/자기변호) 조기종료 및 자유토론 100% 만장일치 조기종료 시스템 구현]
+- **관련 파일 경로:** `server/index.js` (`pass-defense`, `toggle-skip-discussion`), `src/App.tsx` (라이브 패널 UI, `discussionSkipData`, `discussion-skip-updated`)
+- **핵심 기능 및 역할:**
+  1. **최후변론/자기변호(1인 발언)**: 현재 발언자에게 `[⚖️ 변론 완료 ➔]` 버튼을 제공하여 남은 타이머와 무관하게 즉시 다음 단계(자유토론 또는 다음 변호)로 전환 지원.
+  2. **자유토론/투표후 자유토론(다자간 토론)**: 토론 참여자 전원에게 `[⚡ 토론 조기 종료 (N/총원)]` 토글 버튼과 실시간 동의율 프로그레스 바를 제공하고, **100% 전원 만장일치 동의 달성 시 즉시 다음 투표 단계로 직행**하도록 구현함.
+- **주요 함수/에셋 레퍼런스:** `pass-defense`, `toggle-skip-discussion`, `discussion-skip-updated`, `discussionSkipData`, `handlePassDefense`, `handleToggleSkipDiscussion`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
 
 
 
