@@ -1938,10 +1938,10 @@ export default function App() {
               </h2>
               <p style={{ fontSize: "15px", color: "#555", lineHeight: "1.5" }}>
                 {gamePhase === "post-vote-free-talk"
-                  ? <>최다 득표자를 제외한 전원이 <b>10초간</b> 자유롭게 대화할 수 있습니다.</>
+                  ? <>최다 득표자를 제외한 전원이 <b>20초간</b> 자유롭게 대화할 수 있습니다.</>
                   : gamePhase === "last-words"
                   ? <>제한시간 <b>5초</b> 동안 마지막으로 한 마디 남겨주세요!</>
-                  : <>제한시간 <b>7초</b> 동안 변론해 주세요.</>
+                  : <>제한시간 <b>{defenseTime || 45}초</b> 동안 변론해 주세요.</>
                 }
               </p>
             </div>

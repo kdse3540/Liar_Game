@@ -390,6 +390,16 @@
 - **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-25 / ⏱️ 최후변론 후 자유토론 20초 확장 및 모달 변론시간 동적 반영]
+- **관련 파일 경로:** `server/index.js` (`startPostVoteFreeTalk`), `src/App.tsx` (`showPostVoteNotice` 모달)
+- **핵심 기능 및 역할:**
+  1. **투표 후 자유토론 시간 20초 확장**: `startPostVoteFreeTalk`의 진행 시간을 기존 10초에서 20초(`getEffectiveSec(room, 20)`)로 확장하고, 100% 만장일치 조기종료 투표 시스템과 완벽하게 연동함.
+  2. **모달 텍스트 하드코딩 제거 및 동적 표기**: 최후변론/자기변호 모달의 안내 문구(`"제한시간 7초"`)를 방 설정값인 `defenseTime`(15초~60초)으로 동적 표기하고, 투표 후 자유토론 모달 문구도 `"20초간"`으로 최신화함.
+- **주요 함수/에셋 레퍼런스:** `startPostVoteFreeTalk`, `showPostVoteNotice`, `defenseTime`, `post-vote-free-talk`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
 
 
 

@@ -849,18 +849,19 @@ io.on("connection", (socket) => {
   }
 
   // ------------------------------------------------------------------
-  // 5-3c. [핵심 함수] 투표 후 자유토론 (10초, 최다 득표자 제외)
+  // 5-3c. [핵심 함수] 투표 후 자유토론 (20초, 최다 득표자 제외)
   // ------------------------------------------------------------------
   /**
    * startPostVoteFreeTalk(roomCode, excludedSocketIds)
-   * 최다 득표자(들)를 제외한 나머지에게 10초간 자유토론 부여
+   * 최다 득표자(들)를 제외한 나머지에게 20초간 자유토론 부여
    */
   function startPostVoteFreeTalk(code, excludedSocketIds) {
     const room = rooms[code];
     if (!room) return;
 
+    const postSec = getEffectiveSec(room, 20); // 💡 기본 20초 (테스트모드 지원)
     const excludedNames = excludedSocketIds.map(id => room.players.find(p => p.socketId === id)?.name || "참여자").join(", ");
-    console.log(`💬 [투표 후 자유토론] 10초, 제외: ${excludedNames}`);
+    console.log(`💬 [투표 후 자유토론] ${postSec}초, 제외: ${excludedNames}`);
 
     room.phase = "post-vote-free-talk";
     room.activeSpeakerSocketId = ""; // 💡 발언자 초기화
@@ -869,15 +870,15 @@ io.on("connection", (socket) => {
     io.to(code).emit("game-phase-changed", {
       phase: "post-vote-free-talk",
       activeSpeakerSocketId: "",
-      discussionTime: 10,
+      discussionTime: postSec,
       payload: {
         excludedSocketIds,
         excludedNames,
-        timeSec: 10,
+        timeSec: postSec,
       },
     });
 
-    // 10초 후 → 최종 결정 투표 or 재투표 시작
+    // 20초(postSec) 후 → 최종 결정 투표 or 재투표 시작
     if (roomTimers[code]) clearTimeout(roomTimers[code]);
     roomTimers[code] = setTimeout(() => {
       if (!rooms[code]) return; // [방어 코드] 방이 이미 삭제된 경우 실행 중단
