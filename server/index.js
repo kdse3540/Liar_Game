@@ -287,9 +287,24 @@ io.on("connection", (socket) => {
       time: "방금",
     };
 
-    // 💡 [핵심 수정] 힌트 발언 단계(hint-turn)이고, 현재 발언 순서인 유저인 경우에만 힌트 기록(playerHints)에 등록!
-    // 자유 토론(free-talk), 변론, 대기실 등에서의 일반 대화는 힌트 기록에 들어가지 않습니다.
-    if (room.phase === "hint-turn" && room.activeSpeakerSocketId === socket.id) {
+    // 💡 [핵심 수정] 힌트 발언 단계(hint-turn)이고, 현재 발언 순서인 유저인 경우 힌트 기록(playerHints)에 등록!
+    // 자유 토론(free-talk), 최후변론(final-defense/self-defense), 투표, 대기실 등에서의 일반 대화는 제외
+    const isNonHintPhase = (
+      room.phase === "free-talk" ||
+      room.phase === "vote" ||
+      room.phase === "vote-result" ||
+      room.phase === "final-defense" ||
+      room.phase === "self-defense" ||
+      room.phase === "post-vote-free-talk" ||
+      room.phase === "final-decision" ||
+      room.phase === "re-vote" ||
+      room.phase === "roulette" ||
+      room.phase === "result" ||
+      room.phase === "waiting"
+    );
+    const isHintSpeaker = room.activeSpeakerSocketId === socket.id;
+
+    if (room.gameState === "playing" && !isNonHintPhase && isHintSpeaker) {
       if (!room.playerHints) room.playerHints = {};
       const hintKey = sender ? sender.socketId : socket.id;
       if (!room.playerHints[hintKey]) room.playerHints[hintKey] = [];
@@ -302,6 +317,8 @@ io.on("connection", (socket) => {
         text: text.trim(),
         time: "방금",
       });
+
+      console.log(`💡 [힌트 등록 성공] 발언자: ${sender?.name || socket.id}, 내용: "${text.trim()}"`);
 
       // 방 안의 모든 플레이어에게 업데이트된 힌트 목록 브로드캐스트 전송
       io.to(room.roomCode).emit("player-hints-updated", { playerHints: room.playerHints });
@@ -360,7 +377,7 @@ io.on("connection", (socket) => {
 
     room.currentWordInfo = wordInfo;
     room.gameState = "playing";
-    room.phase = "hint-turn";
+    room.phase = "countdown";
     room.round = 1;
     room.playerHints = {}; // 게임 시작 시 힌트 기록 초기화
 
@@ -376,8 +393,6 @@ io.on("connection", (socket) => {
     // 4) 방 턴 및 투표 상태 초기화
     room.turnIndex = 0;
     room.turnCount = 0;
-    room.phase = "countdown";
-    room.round = 1;
     room.activeSpeakerSocketId = room.players[0]?.socketId || "";
     room.votes = {};
     room.eliminatedSocketIds = [];
@@ -413,6 +428,14 @@ io.on("connection", (socket) => {
       activeSpeakerSocketId: room.activeSpeakerSocketId,
       message: "3, 2, 1 카운트다운 시작!",
     });
+
+    // 7) 💡 [자동 동기화 타이머] 카운트다운(3초) + 제시어확인(5초) + 첫 발언자모달(1.8초) 후 hint-turn 자동 설정
+    if (roomTimers[code]) clearTimeout(roomTimers[code]);
+    roomTimers[code] = setTimeout(() => {
+      if (!rooms[code] || rooms[code].gameState !== "playing") return;
+      rooms[code].phase = "hint-turn";
+      console.log(`🎙️ [1라운드 힌트 발언 진입] 방: ${code}, 발언자: ${rooms[code].players[0]?.name}`);
+    }, 9800);
   });
 
   // ------------------------------------------------------------------
@@ -486,12 +509,24 @@ io.on("connection", (socket) => {
   // 5-1b. 최후변론 / 자기변호 조기 종료 (pass-defense)
   // ------------------------------------------------------------------
   socket.on("pass-defense", () => {
-    const code = socket.data.roomCode;
-    const room = rooms[code];
+    let code = socket.data.roomCode;
+    let room = rooms[code];
+    if (!room) {
+      const foundCode = Object.keys(rooms).find((c) =>
+        rooms[c].players.some((p) => p.socketId === socket.id)
+      );
+      if (foundCode) {
+        room = rooms[foundCode];
+        code = foundCode;
+      }
+    }
     if (!room || room.gameState !== "playing") return;
 
     // 현재 발언자 본인만 변론을 조기 종료할 수 있음
-    if (room.activeSpeakerSocketId !== socket.id) return;
+    if (room.activeSpeakerSocketId !== socket.id) {
+      console.log(`⚠️ [변론 조기종료 거부] 발언자 불일치: active=${room.activeSpeakerSocketId}, caller=${socket.id}`);
+      return;
+    }
 
     // 쿨다운 검사 (연타 방지)
     const now = Date.now();
@@ -516,8 +551,17 @@ io.on("connection", (socket) => {
   // 5-1c. 자유토론 100% 만장일치 조기 종료 투표 (toggle-skip-discussion)
   // ------------------------------------------------------------------
   socket.on("toggle-skip-discussion", () => {
-    const code = socket.data.roomCode;
-    const room = rooms[code];
+    let code = socket.data.roomCode;
+    let room = rooms[code];
+    if (!room) {
+      const foundCode = Object.keys(rooms).find((c) =>
+        rooms[c].players.some((p) => p.socketId === socket.id)
+      );
+      if (foundCode) {
+        room = rooms[foundCode];
+        code = foundCode;
+      }
+    }
     if (!room || room.gameState !== "playing") return;
 
     const isFreeTalk = room.phase === "free-talk";
@@ -727,6 +771,7 @@ io.on("connection", (socket) => {
       console.log(`⚖️ [최후변론 시작] ${targetPlayer?.name || "참여자"}, ${defenseSec}초 (설정값: ${room.defenseTime}초)`);
 
       room.phase = "final-defense";
+      room.activeSpeakerSocketId = topIds[0]; // 💡 현재 발언자 소켓 ID 명시 저장 (조기종료 판별용)
       io.to(code).emit("game-phase-changed", {
         phase: "final-defense",
         activeSpeakerSocketId: topIds[0],
@@ -780,6 +825,7 @@ io.on("connection", (socket) => {
     console.log(`🎤 [자기 변호 ${idx + 1}/${queue.length}] ${speakerPlayer?.name || "참여자"}, ${defenseSec}초 (설정값: ${room.defenseTime}초)`);
 
     room.phase = "self-defense";
+    room.activeSpeakerSocketId = speakerId; // 💡 현재 자기변호 발언자 소켓 ID 명시 저장
     io.to(code).emit("game-phase-changed", {
       phase: "self-defense",
       activeSpeakerSocketId: speakerId,
@@ -817,6 +863,7 @@ io.on("connection", (socket) => {
     console.log(`💬 [투표 후 자유토론] 10초, 제외: ${excludedNames}`);
 
     room.phase = "post-vote-free-talk";
+    room.activeSpeakerSocketId = ""; // 💡 발언자 초기화
     room.postVoteExcluded = excludedSocketIds; // 채팅 잠금 대상 저장
     room.skipDiscussionVotes = []; // 💡 투표 후 자유토론 조기종료 동의 목록 초기화
     io.to(code).emit("game-phase-changed", {

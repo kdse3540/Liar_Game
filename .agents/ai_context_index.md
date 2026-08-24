@@ -380,6 +380,16 @@
 - **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-25 / 💡 힌트 로그 기록 누락 수정 및 ⚖️ 최후변론 조기종료 발언자 동기화 버그 수정]
+- **관련 파일 경로:** `server/index.js` (`send-chat`, `pass-defense`, `startPostVoteFlow`, `startNextSelfDefense`), `src/App.tsx` (`set-phase`)
+- **핵심 기능 및 역할:**
+  1. **힌트 로그 누락 해결**: `start-game` 후 1라운드 힌트 발언 진입 시 서버 `room.phase`가 `"countdown"` 상태로 남아 `send-chat`의 `playerHints` 저장 조건이 불일치하던 문제를 해결함 (9.8초 후 자동 `hint-turn` 설정 + 클라이언트 힌트 진입 시 `set-phase` 송신 + 힌트 발언자 판별 로직 유연 보강).
+  2. **최후변론 조기종료 버튼 미동작 해결**: `startPostVoteFlow` 및 `startNextSelfDefense`에서 `room.activeSpeakerSocketId`를 서버 객체에 명시 저장하지 않아 `pass-defense` 수신 시 발언자 불일치로 거부되던 문제를 수정하고, 방 역추적 안전장치를 추가함.
+- **주요 함수/에셋 레퍼런스:** `send-chat`, `player-hints-updated`, `pass-defense`, `startPostVoteFlow`, `startNextSelfDefense`, `room.activeSpeakerSocketId`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
 
 
 

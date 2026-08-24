@@ -740,12 +740,14 @@ export default function App() {
             setTimeout(() => {
               setSpeakerTurnNotice(null);
               setGamePhase("hint-turn");
+              socket.emit("set-phase", { phase: "hint-turn" });
               setTurnTimeLeft(hTime);
               setTurnNoticeText("");
               setIsSystemTyping(false);
             }, 1800);
           } else {
             setGamePhase("hint-turn");
+            socket.emit("set-phase", { phase: "hint-turn" });
             setTurnTimeLeft(hTime);
             setTurnNoticeText("");
             setIsSystemTyping(false);
