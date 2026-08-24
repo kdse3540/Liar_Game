@@ -287,23 +287,27 @@ io.on("connection", (socket) => {
       time: "방금",
     };
 
-    // 실시간 채팅 메시지를 해당 유저의 playerHints에 복합 키(socketId, name)로 즉각 누적 연동!
-    if (!room.playerHints) room.playerHints = {};
-    const hintKey = sender ? sender.socketId : socket.id;
-    if (!room.playerHints[hintKey]) room.playerHints[hintKey] = [];
-    if (sender && sender.name && !room.playerHints[sender.name]) {
-      room.playerHints[sender.name] = room.playerHints[hintKey];
+    // 💡 [핵심 수정] 힌트 발언 단계(hint-turn)이고, 현재 발언 순서인 유저인 경우에만 힌트 기록(playerHints)에 등록!
+    // 자유 토론(free-talk), 변론, 대기실 등에서의 일반 대화는 힌트 기록에 들어가지 않습니다.
+    if (room.phase === "hint-turn" && room.activeSpeakerSocketId === socket.id) {
+      if (!room.playerHints) room.playerHints = {};
+      const hintKey = sender ? sender.socketId : socket.id;
+      if (!room.playerHints[hintKey]) room.playerHints[hintKey] = [];
+      if (sender && sender.name && !room.playerHints[sender.name]) {
+        room.playerHints[sender.name] = room.playerHints[hintKey];
+      }
+
+      room.playerHints[hintKey].push({
+        round: room.round || 1,
+        text: text.trim(),
+        time: "방금",
+      });
+
+      // 방 안의 모든 플레이어에게 업데이트된 힌트 목록 브로드캐스트 전송
+      io.to(room.roomCode).emit("player-hints-updated", { playerHints: room.playerHints });
     }
 
-    room.playerHints[hintKey].push({
-      round: room.round || 1,
-      text: text.trim(),
-      time: "방금",
-    });
-
-    io.to(room.roomCode).emit("player-hints-updated", { playerHints: room.playerHints });
-
-    // 방의 모든 클라이언트에게 실시간 수신
+    // 방의 모든 클라이언트에게 실시간 수신 (일반 채팅 메시지는 단계에 상관없이 항상 전달)
     io.to(room.roomCode).emit("chat-received", chatPayload);
   });
 

@@ -503,6 +503,8 @@ export default function App() {
         setDisconnectNoticeModal(null);
         setGamePhase("waiting");
         setScreen("room"); // 대기실로 복귀
+        setChatLog([]);
+        setUserSpeechMap({});
       }, 2800);
     });
 
@@ -655,6 +657,14 @@ export default function App() {
       setMyInventory({ tomato: 2, egg: 2, water: 2, banana: 2 });
       setPlayerStainsMap({});
       setHitBadgeMap({});
+
+      // 💡 [대기실 ➔ 인게임 전환 시 채팅창 초기화]
+      // 대기실에서 나눈 대화가 인게임 플레이 채팅창으로 넘어가지 않도록 초기화하고 게임 시작 안내 메시지 등록
+      setChatLog([
+        { text: "📢 [시스템]: 🎮 매치가 시작되었습니다! 비밀 제시어를 확인하고 순서대로 힌트를 발표해주세요.", time: "방금" },
+      ]);
+      setUserSpeechMap({});
+      setChatMessage("");
 
       // 이전 게임이나 라운드의 투표 결과 state들을 깨끗이 초기화
       setFinalDecisionResult(null);
@@ -1904,7 +1914,11 @@ export default function App() {
               animation: "popIn 0.3s ease",
             }}>
               <span className="card-label" style={{ color: "#10b981" }}>✨ INNOCENT CLEARED</span>
-              <div style={{ fontSize: "64px", margin: "14px 0" }}>{innocentClearedNotice.targetIcon}</div>
+              <div style={{ margin: "14px 0", display: "flex", justifyContent: "center" }}>
+                <div style={{ width: "64px", height: "64px", borderRadius: "16px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <PlayerIcon icon={innocentClearedNotice.targetIcon} size={64} />
+                </div>
+              </div>
               <h2 style={{ fontSize: "22px", margin: "8px 0 14px 0", color: "#10b981", lineHeight: "1.4" }}>
                 80퍼센트 이상이 <span style={{ color: "#ff4785" }}>[{innocentClearedNotice.targetName}]</span> 님의 무죄를 인정하여 2라운드가 진행됩니다!
               </h2>
@@ -1993,7 +2007,11 @@ export default function App() {
               <span className="card-label" style={{ color: finalDecisionResult.isInnocent ? "#10b981" : "#ff4785" }}>
                 {finalDecisionResult.isInnocent ? "INNOCENT - ROUND 2" : "GUILTY VERDICT"}
               </span>
-              <div style={{ fontSize: "54px", margin: "10px 0" }}>{finalDecisionResult.targetIcon}</div>
+              <div style={{ margin: "10px 0", display: "flex", justifyContent: "center" }}>
+                <div style={{ width: "60px", height: "60px", borderRadius: "16px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <PlayerIcon icon={finalDecisionResult.targetIcon} size={60} />
+                </div>
+              </div>
               <h2 style={{ fontSize: "22px", margin: "5px 0 12px 0", color: "#2b2b2b" }}>
                 [{finalDecisionResult.targetName}] 판정 결과
               </h2>
@@ -2086,7 +2104,11 @@ export default function App() {
               <h1 style={{ fontSize: "32px", margin: "15px 0", color: gameResultData.citizenWin ? "#059669" : "#ff4785" }}>
                 {gameResultData.citizenWin ? "🏆 시민 팀 승리!" : "😈 라이어 승리!"}
               </h1>
-              <div style={{ fontSize: "48px", margin: "10px 0" }}>{gameResultData.targetIcon}</div>
+              <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+                <div style={{ width: "64px", height: "64px", borderRadius: "16px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <PlayerIcon icon={gameResultData.targetIcon} size={64} />
+                </div>
+              </div>
               <p style={{ fontSize: "18px", fontWeight: "bold", color: "#2b2b2b" }}>
                 [{gameResultData.targetName}]은(는) {gameResultData.isActualLiar ? "라이어였습니다!" : "라이어가 아니었습니다!"}
               </p>
@@ -2116,6 +2138,7 @@ export default function App() {
                 setGameResultData(null);
                 setFinalDecisionResult(null);
                 setChatLog([]);
+                setUserSpeechMap({});
               }}>
                 대기실로 돌아가기 ➜
               </button>
@@ -2168,7 +2191,7 @@ export default function App() {
                     {/* 충돌 시 머리 위에 떠오르는 [🎯 던진 사람: 🦊 닉네임] 표식 */}
                     {hitBadge && (
                       <div className="throw-hit-sender-badge">
-                        🎯 던진 사람: {hitBadge.senderIcon} {hitBadge.senderName}
+                        🎯 던진 사람: <PlayerIcon icon={hitBadge.senderIcon} size={16} /> {hitBadge.senderName}
                       </div>
                     )}
 
@@ -2553,79 +2576,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 💡 [포트레이트 힌트 작성 히스토리 모달] */}
-      {selectedHintPlayer && (
-        <div className="modal-backdrop" style={{ zIndex: 99990 }} onClick={() => setSelectedHintPlayer(null)}>
-          <div className="nickname-modal" style={{ maxWidth: "420px", width: "90%", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-            <span className="card-label" style={{ color: "#ffb703" }}>HINT HISTORY</span>
-            <div style={{ margin: "8px 0", display: "flex", justifyContent: "center" }}>
-              <div style={{ width: "52px", height: "52px", borderRadius: "14px", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                <PlayerIcon icon={selectedHintPlayer.icon} size={52} />
-              </div>
-            </div>
-            <h2 style={{ fontSize: "20px", margin: "4px 0 14px 0", color: "#2b2b2b" }}>
-              💡 <span style={{ color: "#635bff" }}>[{selectedHintPlayer.name}]</span> 님의 힌트 히스토리
-            </h2>
-            <p style={{ fontSize: "12px", color: "#666", marginBottom: "16px" }}>
-              이 유저가 이번 매치에서 발표한 라운드별 힌트 기록입니다.
-            </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "240px", overflowY: "auto", textAlign: "left" }}>
-              {(() => {
-                // 1) 백엔드 저장소 playerHints 객체에서 힌트 배열 추출
-                const savedHints =
-                  playerHints[selectedHintPlayer.socketId] ||
-                  playerHints[selectedHintPlayer.name] ||
-                  [];
-
-                // 2) chatLog 대화 기록에서 해당 유저의 모든 발언 메시지 추출
-                const chatMatchedHints = chatLog
-                  .filter((log) => {
-                    const parts = log.text.split(":");
-                    const senderName = parts[0]?.trim();
-                    return senderName === selectedHintPlayer.name;
-                  })
-                  .map((log, idx) => {
-                    const parts = log.text.split(":");
-                    const content = parts.slice(1).join(":").trim() || log.text;
-                    return { round: idx + 1, text: content, time: log.time };
-                  });
-
-                // 3) 두 기록 중 유효한 힌트 배열 자동 병합
-                const combined = savedHints.length > 0 ? savedHints : chatMatchedHints;
-
-                if (combined.length === 0) {
-                  return (
-                    <div style={{ padding: "20px", textAlign: "center", color: "#888", background: "#f8f6f0", borderRadius: "12px", fontSize: "13px" }}>
-                      아직 제출한 힌트가 없습니다. 💬
-                    </div>
-                  );
-                }
-                return combined.map((h: any, idx: number) => (
-                  <div key={idx} style={{ padding: "12px 14px", background: "#f3f0ff", border: "1.5px solid #d8ceff", borderRadius: "12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "bold", color: "#635bff", marginBottom: "4px" }}>
-                      <span>💬 힌트 발언 #{idx + 1}</span>
-                      <span style={{ color: "#aaa" }}>{h.time}</span>
-                    </div>
-                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#20212b", wordBreak: "break-word" }}>
-                      "{h.text}"
-                    </div>
-                  </div>
-                ));
-              })()}
-            </div>
-
-            <button
-              type="button"
-              className="primary-button"
-              style={{ width: "100%", marginTop: "16px" }}
-              onClick={() => setSelectedHintPlayer(null)}
-            >
-              닫기 ➔
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 닉네임 수정 모달 팝업 */}
       {editingNickname && (
@@ -2707,7 +2657,13 @@ export default function App() {
             
             <div style={{ textAlign: "left", background: "#f8fafc", padding: "16px", borderRadius: "14px", border: "1px solid #e2e8f0", margin: "15px 0", maxHeight: "250px", overflowY: "auto" }}>
               {(() => {
-                const hints = playerHints[selectedHintPlayer.socketId || ""] || [];
+                // 💡 백엔드 실시간 저장소(playerHints)에서 해당 유저의 힌트 목록만 조회
+                // (힌트 발언 턴에 등록된 정식 힌트만 포함되며, 자유토론/일반 채팅 내용은 포함되지 않습니다)
+                const hints =
+                  playerHints[selectedHintPlayer.socketId || ""] ||
+                  playerHints[selectedHintPlayer.name || ""] ||
+                  [];
+
                 if (hints.length === 0) {
                   return <p style={{ color: "#94a3b8", fontStyle: "italic", textAlign: "center", margin: "10px 0" }}>아직 제출한 힌트가 없습니다. 💬</p>;
                 }

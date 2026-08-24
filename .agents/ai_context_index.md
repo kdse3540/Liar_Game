@@ -336,6 +336,30 @@
 - **특이사항/의존성:** `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-25 / 💡 Hint 기록에 힌트 발언 턴(hint-turn) 메시지만 등록되도록 수정]
+- **관련 파일 경로:** `server/index.js` 내 `socket.on("send-chat")`, `src/App.tsx` 내 `selectedHintPlayer` 모달 영역
+- **핵심 기능 및 역할:** 기존에 자유 토론, 최후변론, 대기실 등 모든 상황의 채팅 메시지가 `room.playerHints`에 등록되던 버그를 수정하여 오직 힌트 발언 단계(`room.phase === "hint-turn"`)이자 현재 발언 순서인 유저(`room.activeSpeakerSocketId === socket.id`)의 발언만 힌트 기록으로 저장·동기화되도록 수정하고, 프론트엔드의 중복 힌트 모달 코드를 깔끔하게 정리함.
+- **주요 함수/에셋 레퍼런스:** `send-chat`, `playerHints`, `player-hints-updated`, `selectedHintPlayer`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
+---
+## [2026-08-25 / 💬 게임 시작(game-started) 시 대기실 채팅 로그 초기화 및 인게임 분리]
+- **관련 파일 경로:** `src/App.tsx` 내 `socket.on("game-started")`, `socket.on("not-enough-players")`
+- **핵심 기능 및 역할:** 대기실에서 나눈 대화 내용이 게임 플레이 화면(`play`)의 채팅창(`astra-message-list`)으로 그대로 이월되어 발생하던 혼동을 해소하기 위해, 새 매치 시작 시 `chatLog`와 `userSpeechMap`(말풍선), `chatMessage`를 깨끗이 초기화하고 "🎮 매치가 시작되었습니다!" 시스템 안내 메시지만 깔끔하게 시작되도록 개선함.
+- **주요 함수/에셋 레퍼런스:** `game-started`, `setChatLog`, `setUserSpeechMap`, `astra-message-list`
+- **특이사항/의존성:** `npm run build` 검증 완료.
+---
+
+---
+## [2026-08-25 / 🖼️ Game Result 및 판정 결과 모달 포트레이트 이미지 렌더링 정상화]
+- **관련 파일 경로:** `src/App.tsx` 내 `gameResultData`, `finalDecisionResult`, `innocentClearedNotice` 모달 및 상단 `hitBadge`
+- **핵심 기능 및 역할:** Game Result(최종 결과 모달), 80% 무죄 구제 알림, 유죄 판정 결과 모달 등에서 지목 대상자의 `targetIcon`이 문자열 텍스트(`"/portraits/Portrait_12.png"`)로 그대로 노출되던 문제를 `<PlayerIcon />` 컴포넌트로 교체하여 고화질 일러스트 포트레이트가 둥근 사각형으로 예쁘게 렌더링되도록 수정함.
+- **주요 함수/에셋 레퍼런스:** `PlayerIcon` 컴포넌트, `gameResultData.targetIcon`, `finalDecisionResult.targetIcon`, `innocentClearedNotice.targetIcon`
+- **특이사항/의존성:** `npm run build` 검증 완료.
+---
+
 
 
 
