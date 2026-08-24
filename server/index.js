@@ -1286,6 +1286,10 @@ io.on("connection", (socket) => {
 
     room.phase = "result";
     room.gameState = "waiting"; // 게임 종료
+    // 💡 [핵심] 게임 종료 후 대기실 복귀 시 모든 플레이어의 준비 완료(ready) 상태를 false로 초기화!
+    room.players.forEach((p) => {
+      p.ready = false;
+    });
 
     io.to(code).emit("game-phase-changed", {
       phase: "result",
@@ -1487,6 +1491,7 @@ io.on("connection", (socket) => {
         // 방 상태를 대기실 모드로 리셋
         room.gameState = "waiting";
         room.phase = "waiting";
+        room.players.forEach((p) => { p.ready = false; }); // 💡 레디 해제
         room.votes = {};
         room.finalDecisionVotes = {};
         room.reVotes = {};

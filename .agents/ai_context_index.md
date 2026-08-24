@@ -400,6 +400,14 @@
 - **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
 ---
 
+---
+## [2026-08-25 / 🔄 게임 종료 후 대기실 복귀 시 준비완료(ready) 상태 자동 해제]
+- **관련 파일 경로:** `server/index.js` (`revealLiarResult`, `disconnect` 인원부족 핸들러), `src/App.tsx` (`대기실로 돌아가기` onClick)
+- **핵심 기능 및 역할:** 게임이 종료되어 결과 공개(`revealLiarResult`) 후 대기실로 돌아왔을 때, 이전 판의 `ready` 상태가 남아 자동으로 준비완료가 유지되던 문제를 해결하기 위해 서버 및 클라이언트에서 전원 `ready: false`로 초기화하도록 수정함.
+- **주요 함수/에셋 레퍼런스:** `revealLiarResult`, `p.ready = false`, `handleLeaveRoom`, `room.gameState = "waiting"`
+- **특이사항/의존성:** `node --check server/index.js` 및 `npm run build` 검증 완료.
+---
+
 
 
 

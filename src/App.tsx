@@ -2182,6 +2182,7 @@ export default function App() {
                 setFinalDecisionResult(null);
                 setChatLog([]);
                 setUserSpeechMap({});
+                setOnlinePlayers((prev) => prev.map((p) => ({ ...p, ready: false })));
               }}>
                 대기실로 돌아가기 ➜
               </button>
